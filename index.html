@@ -295,29 +295,31 @@ async function shareCard(m){
   g.fillStyle = bg; g.fillRect(0, 0, W, H);
   const rr = (x, y, w, h, r) => { g.beginPath(); g.roundRect(x, y, w, h, r); };
   // message card
-  g.font = '600 56px Rubik, sans-serif';
+  g.font = '600 68px Rubik, sans-serif';
   const msgLines = wrapLines(g, m.body, 780).slice(0, 10);
-  g.font = '400 46px Rubik, sans-serif';
+  g.font = '400 54px Rubik, sans-serif';
   const repLines = m.reply ? wrapLines(g, m.reply, 760).slice(0, 8) : [];
-  const cardH = 170 + msgLines.length * 72 + (repLines.length ? 70 + repLines.length * 60 : 0);
+  const cardH = 170 + msgLines.length * 86 + (repLines.length ? 80 + repLines.length * 70 : 0);
   const top = Math.max(260, (H - cardH) / 2 - 80);
   g.fillStyle = 'rgba(0,0,0,.18)'; rr(110, top + 16, 860, cardH, 56); g.fill();
   g.fillStyle = '#fff'; rr(110, top, 860, cardH, 56); g.fill();
-  g.fillStyle = '#111'; rr(150, top + 40, 780, 110 + msgLines.length * 72 - 40, 40); g.fill();
-  g.fillStyle = '#fff'; g.font = '600 56px Rubik, sans-serif';
-  msgLines.forEach((l, i) => g.fillText(l, 190, top + 120 + i * 72));
+  g.fillStyle = '#111'; rr(150, top + 40, 780, 80 + msgLines.length * 86, 40); g.fill();
+  g.fillStyle = '#fff'; g.font = '600 68px Rubik, sans-serif';
+  msgLines.forEach((l, i) => g.fillText(l, 190, top + 132 + i * 86));
   if (repLines.length) {
-    const ry = top + 110 + msgLines.length * 72 + 60;
-    g.fillStyle = '#ff5f6d'; g.fillRect(160, ry - 44, 10, repLines.length * 60 + 10);
-    g.fillStyle = '#111'; g.font = '400 46px Rubik, sans-serif';
-    repLines.forEach((l, i) => g.fillText(l, 195, ry + i * 60));
+    const ry = top + 120 + msgLines.length * 86 + 80;
+    g.fillStyle = '#ff5f6d'; g.fillRect(160, ry - 50, 10, repLines.length * 70 + 10);
+    g.fillStyle = '#111'; g.font = '400 54px Rubik, sans-serif';
+    repLines.forEach((l, i) => g.fillText(l, 195, ry + i * 70));
   }
   // header + footer
   g.fillStyle = '#fff'; g.textAlign = 'center';
   g.font = '800 96px Rubik, sans-serif'; g.fillText('wyspr', W / 2, 190);
-  g.font = '600 44px Rubik, sans-serif'; g.fillText(m.revealed ? 'from @' + m.from_name : 'from anonymous 🤫', W / 2, top - 50);
+  g.font = '600 52px Rubik, sans-serif'; g.fillText(m.revealed ? 'from @' + m.from_name : 'from anonymous 🤫', W / 2, top - 50);
   g.font = '600 46px Rubik, sans-serif'; g.fillText('send me anonymous messages 👇', W / 2, H - 260);
-  g.font = '800 50px Rubik, sans-serif'; g.fillText((location.host + '/u/' + me.username).slice(0, 40), W / 2, H - 180);
+  const link = location.host + '/u/' + me.username; let fs = 56;
+  do { g.font = `800 ${fs}px Rubik, sans-serif`; fs -= 2; } while (g.measureText(link).width > W - 120 && fs > 20);
+  g.fillText(link, W / 2, H - 180);
   const blob = await new Promise(r => c.toBlob(r, 'image/png'));
   const url = URL.createObjectURL(blob);
   const file = new File([blob], 'wyspr.png', { type: 'image/png' });
