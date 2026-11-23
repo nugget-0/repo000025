@@ -57,6 +57,9 @@ button:disabled{opacity:.5}
 .chips button{min-height:34px;padding:5px 11px;font-size:13px;font-weight:600;background:var(--soft);color:var(--ink);border:1.5px solid #ddd;border-radius:999px}
 .chips button:hover{border-color:var(--ink)}
 .badge{display:inline-block;min-width:22px;padding:0 7px;margin-left:6px;border-radius:999px;background:var(--red);color:#fff;font-size:13px;line-height:22px}
+.mile .card{animation:none}.mile-num{font-size:84px;font-weight:800;line-height:1;background:linear-gradient(135deg,#ec1187,#ffa94d);-webkit-background-clip:text;background-clip:text;color:transparent;margin-bottom:6px}
+@media(prefers-reduced-motion:no-preference){.mile-num{animation:bump .6s cubic-bezier(.3,1.6,.5,1)}@keyframes bump{from{transform:scale(.3)}}}
+.own{border:3px solid #111!important}
 .guessed{background:#fff3c4;border-radius:12px;padding:8px 12px;font-weight:600;margin-bottom:8px}
 .modal{position:fixed;inset:0;background:rgba(0,0,0,.55);display:grid;place-items:center;padding:16px;z-index:20}
 .modal .card{width:min(420px,100%);max-height:94vh;overflow:auto}
@@ -97,10 +100,26 @@ const av = (src, name, s = 36) => src ? `<img class="av" style="--s:${s}px" src=
 const PROMPTS = ['send me anonymous messages!', 'ask me anything', 'rate me 1–10 (be honest)', 'what was your first impression of me?',
   'confess something 👀', 'tell me a secret', "what's one thing you'd change about me?", 'who do you think I have a crush on?',
   'describe me in 3 words', 'never have I ever…', 'what song reminds you of me?', 'truth or dare?'];
-function setUnread(n){
-  me.unread = n;
+function setUnread(n, r = me.replies || 0){
+  me.unread = n; me.replies = r;
   const b = $('#t-in'); if (b) b.innerHTML = 'Inbox' + (n ? `<span class="badge">${n}</span>` : '');
-  document.title = (n ? `(${n}) ` : '') + 'Wyspr — anonymous messages';
+  const s2 = $('#t-sent'); if (s2) s2.innerHTML = 'Sent' + (r ? `<span class="badge">${r}</span>` : '');
+  document.title = (n + r ? `(${n + r}) ` : '') + 'Wyspr — anonymous messages';
+}
+// milestones: celebrate 1st, 5th, 10th, 25th... message once each
+const MILESTONES = [1, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000];
+const MILESTONE_TEXT = { 1: 'Your first message! 🎉', 5: '5 messages! People are talking 👀', 10: '10 messages! You\'re popular 🔥',
+  25: '25 messages! Main character energy ✨', 50: '50 messages!! 🤯', 100: '100 MESSAGES 💯' };
+async function checkMilestone(){
+  const hit = MILESTONES.filter(n => n <= (me.received || 0) && n > (me.milestone || 0)).pop();
+  if (!hit || document.querySelector('.mile')) return;
+  me.milestone = hit;
+  try { await call('milestone', { n: hit }); } catch {}
+  document.body.insertAdjacentHTML('beforeend', `<div class="modal mile"><div class="card" style="margin:0;text-align:center">
+    <div class="mile-num">${hit}</div><h2>${esc(MILESTONE_TEXT[hit] || hit + ' messages! Legend status 👑')}</h2>
+    <p class="note">${hit === 1 ? 'Someone sent you a message. Go see what they said 👀' : 'Share your link again to keep them coming.'}</p>
+    <div class="row" style="justify-content:center"><button id="mile-x">Let's go</button></div></div></div>`);
+  $('#mile-x').onclick = () => document.querySelector('.mile').remove();
 }
 // shrink a picked image to a small square JPEG in the browser
 function shrinkImage(file){
@@ -171,16 +190,28 @@ async function sendPage(name){
     <label class="check"><input type="checkbox" id="rv"> Let them know it's me (@${esc(me.username)})</label>
     <div class="err" id="e"></div><button style="width:100%" id="sb">Send!</button></form>
     <p class="note">Anonymous to them unless you tick the box. You can still reveal later from your Sent tab.</p></div>
-    <div class="card"><h2>Get your own messages</h2><a href="/"><button class="ghost">Open my inbox</button></a></div>`;
+    <div id="after"></div>`;
   $('#t').oninput = () => { try { sessionStorage.setItem('wyspr_draft_' + name, $('#t').value); } catch {} };
   $('#sf').onsubmit = async e => {
     e.preventDefault(); $('#e').textContent = ''; $('#sb').disabled = true;
     try { await call('send', { to: name, body: $('#t').value, reveal: $('#rv').checked });
       try { sessionStorage.removeItem('wyspr_draft_' + name); } catch {}
-      $('#t').value = ''; $('#rv').checked = false; toast('Sent! 🤫'); }
+      $('#t').value = ''; $('#rv').checked = false; toast('Sent! 🤫'); wantYourOwn(); }
     catch (x) { $('#e').textContent = x.message; }
     $('#sb').disabled = false;
   };
+}
+
+// after sending: push the sender to share their own link
+function wantYourOwn(){
+  const link = location.origin + '/u/' + me.username;
+  $('#after').innerHTML = `<div class="card own"><h2>Sent 🤫 Now it's your turn</h2>
+    <p style="margin:0 0 12px">Want to know what people really think of <b>you</b>? Post your own link and get anonymous messages too.</p>
+    <div class="link"><input readonly value="${esc(link)}" id="own-l"><button id="own-c">Copy</button></div>
+    <div class="row" style="margin-top:10px">${navigator.share ? '<button id="own-s">Share my link</button>' : ''}<a href="/"><button class="ghost">Open my inbox</button></a></div></div>`;
+  $('#own-c').onclick = async () => { try { await navigator.clipboard.writeText(link); toast('Link copied — go post it!'); } catch { $('#own-l').select(); } };
+  if ($('#own-s')) $('#own-s').onclick = async () => { try { await navigator.share({ text: 'send me anonymous messages 👀', url: link }); } catch {} };
+  $('#after').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
 // ---------- home: link, prompt, inbox, sent ----------
@@ -203,13 +234,15 @@ function home(){
   $('#pic').onchange = async e => { const f = e.target.files[0]; if (!f) return;
     try { const d = await call('avatar', { image: await shrinkImage(f) }); me.avatar = d.avatar; toast('Photo updated'); renderWho(); home(); } catch (x) { toast(x.message); } };
   if ($('#pr0')) $('#pr0').onclick = async () => { try { await call('avatar', { image: null }); me.avatar = null; renderWho(); home(); } catch (x) { toast(x.message); } };
-  setUnread(me.unread || 0);
+  setUnread(me.unread || 0, me.replies || 0);
+  checkMilestone();
   $('#t-in').onclick = () => { tab = 'inbox'; home(); };
   $('#t-sent').onclick = () => { tab = 'sent'; home(); };
   loadList();
   clearInterval(poll); poll = setInterval(async () => {
     if (document.hidden || document.querySelector('#list textarea, #list input, .modal')) return;
-    if (tab === 'inbox') loadList(); else { try { setUnread((await call('unread')).unread); } catch {} }
+    try { const c = await call('unread'); Object.assign(me, { received: c.received }); setUnread(c.unread, c.replies); checkMilestone(); } catch {}
+    loadList();
   }, 15000);
 }
 
@@ -223,24 +256,25 @@ async function loadList(){
       <div class="meta">${m.revealed ? av(m.from_avatar, m.from_name, 24) + ' from <b>@' + esc(m.from_name) + '</b>' : 'from <b>anonymous</b>'} · ${ago(m.created_at)}${m.seen ? '' : ' · <b style="color:var(--y2)">new</b>'}</div>
       <div class="text">${esc(m.body)}</div>
       ${m.reply ? `<div class="reply"><b>You:</b> ${esc(m.reply)}</div>` : ''}
-      ${!m.revealed && m.guesses.length ? `<div class="note" style="margin-bottom:8px">Your guesses: ${m.guesses.map(g => '@' + esc(g)).join(', ')} · ${3 - m.guesses.length} left</div>` : ''}
+      ${!m.revealed && m.guesses.length ? `<div class="note" style="margin-bottom:8px">Your guess: ${m.guesses.map(g => '@' + esc(g)).join(', ')} 🤞</div>` : ''}
       <div class="row"><button class="small" data-a="reply">${m.reply ? 'Edit reply' : 'Reply'}</button>
         <button class="small" data-a="share">Share</button>
-        ${!m.revealed && m.guesses.length < 3 ? '<button class="small ghost" data-a="guess">Guess who 🤔</button>' : ''}
+        ${!m.revealed && !m.guesses.length ? (m.reply ? '<button class="small ghost" data-a="guess">Guess who 🤔</button>' : '<button class="small ghost" data-a="guesslocked">Guess who 🔒</button>') : ''}
         <button class="small ghost" data-a="delete">Delete</button>
         <button class="small danger" data-a="block">Block sender</button>
         <button class="small danger" data-a="report">Report</button></div>
     </div>` : `
-    <div class="msg" data-id="${m.id}">
+    <div class="msg${m.reply && !m.reply_seen ? ' new' : ''}" data-id="${m.id}">
       <div class="meta">${av(m.to_avatar, m.to_name, 24)} to <b>@${esc(m.to_name)}</b> · ${ago(m.created_at)} · ${m.revealed ? 'they know it\'s you' : 'anonymous'}</div>
       <div class="text">${esc(m.body)}</div>
-      ${m.reply ? `<div class="reply"><b>@${esc(m.to_name)}:</b> ${esc(m.reply)}</div>` : ''}
+      ${m.reply ? `<div class="reply"><b>@${esc(m.to_name)}${m.reply_seen ? '' : ' replied 💬'}:</b> ${esc(m.reply)}</div>` : ''}
       ${!m.revealed && m.guessed ? `<div class="guessed">👀 @${esc(m.to_name)} guessed it's you!</div>` : ''}
       ${!m.revealed && !m.guessed && m.guess_count ? `<div class="note" style="margin-bottom:8px">They've guessed ${m.guess_count} time${m.guess_count === 1 ? '' : 's'} — not you (yet)</div>` : ''}
       ${m.revealed ? '' : '<div class="row"><button class="small ghost" data-a="reveal">Reveal it\'s me</button></div>'}
     </div>`).join('');
   rowsById = Object.fromEntries(rows.map(m => [m.id, m]));
   if (tab === 'inbox' && rows.some(m => !m.seen)) { try { await call('seen', {}); } catch {} setUnread(0); }
+  if (tab === 'sent' && rows.some(m => m.reply && !m.reply_seen)) { try { await call('replies-seen', {}); } catch {} setUnread(me.unread || 0, 0); }
 }
 
 $('#app').addEventListener('click', async e => {
@@ -252,9 +286,10 @@ $('#app').addEventListener('click', async e => {
     box.querySelector('textarea').focus(); return;
   }
   if (a === 'cancel') { b.parentElement.parentElement.remove(); return; }
+  if (a === 'guesslocked') { toast('Reply to the message first to unlock your guess'); return; }
   if (a === 'guess') {
     if (box.querySelector('.gform')) return;
-    box.insertAdjacentHTML('beforeend', `<div class="gform" style="margin-top:10px"><p class="note" style="margin:0 0 6px">Who do you think sent it? You won't be told if you're right — but if you are, they'll find out and can choose to reveal.</p>
+    box.insertAdjacentHTML('beforeend', `<div class="gform" style="margin-top:10px"><p class="note" style="margin:0 0 6px">You get <b>one</b> guess on this message (and 3 a day in total). You won't be told if you're right — but if you are, they'll find out and can choose to reveal.</p>
       <div class="link"><input placeholder="@username" autocapitalize="none" style="margin:0"><button class="small" data-a="sendguess">Guess</button><button class="small ghost" data-a="cancel">Cancel</button></div></div>`);
     box.querySelector('.gform input').focus(); return;
   }

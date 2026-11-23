@@ -114,13 +114,26 @@ async function api(req, path) {
   switch (path) {
     case '/api/me':
     case '/api/unread': {
-      const n = await q('SELECT count(*) AS n FROM messages WHERE to_user = $1 AND NOT seen', [me.id]);
-      if (path === '/api/unread') return json({ unread: Number(n[0].n) });
-      return json({ username: me.username, prompt: me.prompt, avatar: me.avatar, unread: Number(n[0].n), admin: me.username === ADMIN });
+      const n = await q(`SELECT (SELECT count(*) FROM messages WHERE to_user = $1 AND NOT seen) AS unread,
+        (SELECT count(*) FROM messages WHERE from_user = $1 AND reply IS NOT NULL AND NOT reply_seen) AS replies,
+        (SELECT count(*) FROM messages WHERE to_user = $1) AS received,
+        (SELECT milestone FROM users WHERE id = $1) AS milestone`, [me.id]);
+      const c = { unread: Number(n[0].unread), replies: Number(n[0].replies), received: Number(n[0].received), milestone: Number(n[0].milestone) };
+      if (path === '/api/unread') return json(c);
+      return json({ username: me.username, prompt: me.prompt, avatar: me.avatar, ...c, admin: me.username === ADMIN });
     }
 
     case '/api/seen':
       await q('UPDATE messages SET seen = true WHERE to_user = $1 AND NOT seen', [me.id]);
+      return json({ ok: true });
+
+    case '/api/replies-seen':
+      await q('UPDATE messages SET reply_seen = true WHERE from_user = $1 AND NOT reply_seen', [me.id]);
+      return json({ ok: true });
+
+    case '/api/milestone':
+      // remember the biggest milestone already celebrated (can't go above what they've really received)
+      await q('UPDATE users SET milestone = GREATEST(milestone, LEAST($1::int, (SELECT count(*) FROM messages WHERE to_user = $2))) WHERE id = $2', [Number(body.n) || 0, me.id]);
       return json({ ok: true });
 
     case '/api/avatar': {
@@ -176,24 +189,28 @@ async function api(req, path) {
       // a right guess lets the sender know, and the sender decides whether to reveal
       const guess = String(body.username || '').trim().toLowerCase().replace(/^@/, '');
       if (!USERNAME_RE.test(guess)) return err('Type a username');
-      const rows = await q(`SELECT m.revealed, u.username AS from_name, (SELECT count(*) FROM guesses g WHERE g.message_id = m.id) AS n
+      // hard mode: 1 guess per message, you must reply first, and only 3 guesses a day
+      const rows = await q(`SELECT m.revealed, m.reply, u.username AS from_name, (SELECT count(*) FROM guesses g WHERE g.message_id = m.id) AS n,
+        (SELECT count(*) FROM guesses g JOIN messages m2 ON m2.id = g.message_id WHERE m2.to_user = $2 AND g.created_at > now() - interval '1 day') AS today
         FROM messages m JOIN users u ON u.id = m.from_user WHERE m.id = $1 AND m.to_user = $2`, [body.id, me.id]);
       if (!rows.length) return err('Not your message', 404);
       if (rows[0].revealed === 't' || rows[0].revealed === 'true') return err('They already revealed themselves');
-      if (Number(rows[0].n) >= 3) return err('No guesses left on this one');
+      if (Number(rows[0].n) >= 1) return err('You already used your guess on this one');
+      if (!rows[0].reply) return err('Reply to the message first, then you can guess');
+      if (Number(rows[0].today) >= 3) return err('Out of guesses for today — come back tomorrow');
       await q('INSERT INTO guesses (message_id, guess, correct) VALUES ($1, $2, $3)', [body.id, guess, guess === rows[0].from_name ? 'true' : 'false']);
-      return json({ ok: true, left: 2 - Number(rows[0].n) });
+      return json({ ok: true, today_left: 2 - Number(rows[0].today) });
     }
 
     case '/api/sent': {
       const rows = await q(
-        `SELECT m.id, m.body, m.created_at, m.reply, m.revealed, u.username AS to_name, u.avatar AS to_avatar,
+        `SELECT m.id, m.body, m.created_at, m.reply, m.reply_seen, m.revealed, u.username AS to_name, u.avatar AS to_avatar,
                 (SELECT count(*) FROM guesses g WHERE g.message_id = m.id) AS guess_count,
                 EXISTS (SELECT 1 FROM guesses g WHERE g.message_id = m.id AND g.correct) AS guessed
            FROM messages m JOIN users u ON u.id = m.to_user
           WHERE m.from_user = $1 ORDER BY m.created_at DESC LIMIT 100`, [me.id]);
       return json(rows.map(r => ({ ...r, revealed: r.revealed === 't' || r.revealed === 'true',
-        guessed: r.guessed === 't' || r.guessed === 'true', guess_count: Number(r.guess_count) })));
+        guessed: r.guessed === 't' || r.guessed === 'true', guess_count: Number(r.guess_count), reply_seen: r.reply_seen !== 'f' && r.reply_seen !== 'false' })));
     }
 
     case '/api/reveal': {
@@ -204,7 +221,7 @@ async function api(req, path) {
     case '/api/reply': {
       const text = String(body.text || '').trim().slice(0, 500);
       if (!text) return err('Write a reply first');
-      const rows = await q('UPDATE messages SET reply = $1, replied_at = now() WHERE id = $2 AND to_user = $3 RETURNING id', [text, body.id, me.id]);
+      const rows = await q('UPDATE messages SET reply = $1, replied_at = now(), reply_seen = false WHERE id = $2 AND to_user = $3 RETURNING id', [text, body.id, me.id]);
       return rows.length ? json({ ok: true }) : err('Not your message', 404);
     }
 
