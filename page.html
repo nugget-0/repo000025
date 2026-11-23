@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Psst — anonymous messages</title>
+<title>Wyspr — anonymous messages</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Rubik:wght@400;600;800&display=swap" rel="stylesheet">
 <style>
@@ -54,20 +54,20 @@ button:disabled{opacity:.5}
 </head>
 <body>
 <div class="wrap">
-  <header><div class="logo">psst<span>?</span></div><div id="who" class="row"></div></header>
+  <header><div class="logo">wyspr<span>?</span></div><div id="who" class="row"></div></header>
   <main id="app"></main>
 </div>
 <div class="toast" id="toast"></div>
 <script>
 {
-const API = window.PSST_API || '';
+const API = window.WYSPR_API || '';
 const $ = s => document.querySelector(s);
 const app = $('#app');
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-let token = null; try { token = localStorage.getItem('psst_token'); } catch {}
+let token = null; try { token = localStorage.getItem('wyspr_token'); } catch {}
 let me = null, tab = 'inbox', poll = null;
 
-function setToken(t){ token = t; try { t ? localStorage.setItem('psst_token', t) : localStorage.removeItem('psst_token'); } catch {} }
+function setToken(t){ token = t; try { t ? localStorage.setItem('wyspr_token', t) : localStorage.removeItem('wyspr_token'); } catch {} }
 function toast(t){ const el = $('#toast'); el.textContent = t; el.style.display = 'block'; clearTimeout(el._t); el._t = setTimeout(() => el.style.display = 'none', 2200); }
 function ago(ts){ const s = (Date.now() - new Date(ts)) / 1000; if (s < 60) return 'just now'; if (s < 3600) return Math.floor(s/60) + 'm ago'; if (s < 86400) return Math.floor(s/3600) + 'h ago'; return Math.floor(s/86400) + 'd ago'; }
 
@@ -118,7 +118,7 @@ async function sendPage(name){
   try { prof = await call('profile/' + encodeURIComponent(name)); }
   catch (x) { app.innerHTML = `<div class="card"><h2>${esc(x.message)}</h2><a href="/">Go home</a></div>`; return; }
   if (!me) { authForm(`Sign in to message @${prof.username}`, () => sendPage(name)); return; }
-  let draft = ''; try { draft = sessionStorage.getItem('psst_draft_' + name) || ''; } catch {}
+  let draft = ''; try { draft = sessionStorage.getItem('wyspr_draft_' + name) || ''; } catch {}
   app.innerHTML = `<div class="card"><div class="meta">@${esc(prof.username)}</div>
     <div class="bubble">${esc(prof.prompt)}</div>
     <form id="sf"><textarea id="t" maxlength="500" placeholder="send me anonymous messages...">${esc(draft)}</textarea>
@@ -126,11 +126,11 @@ async function sendPage(name){
     <div class="err" id="e"></div><button style="width:100%" id="sb">Send!</button></form>
     <p class="note">Anonymous to them unless you tick the box. You can still reveal later from your Sent tab.</p></div>
     <div class="card"><h2>Get your own messages</h2><a href="/"><button class="ghost">Open my inbox</button></a></div>`;
-  $('#t').oninput = () => { try { sessionStorage.setItem('psst_draft_' + name, $('#t').value); } catch {} };
+  $('#t').oninput = () => { try { sessionStorage.setItem('wyspr_draft_' + name, $('#t').value); } catch {} };
   $('#sf').onsubmit = async e => {
     e.preventDefault(); $('#e').textContent = ''; $('#sb').disabled = true;
     try { await call('send', { to: name, body: $('#t').value, reveal: $('#rv').checked });
-      try { sessionStorage.removeItem('psst_draft_' + name); } catch {}
+      try { sessionStorage.removeItem('wyspr_draft_' + name); } catch {}
       $('#t').value = ''; $('#rv').checked = false; toast('Sent! 🤫'); }
     catch (x) { $('#e').textContent = x.message; }
     $('#sb').disabled = false;
