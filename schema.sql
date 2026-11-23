@@ -1,0 +1,7 @@
+CREATE TABLE users (id bigserial PRIMARY KEY, username text UNIQUE NOT NULL, pass_hash text NOT NULL, prompt text NOT NULL DEFAULT 'send me anonymous messages!', created_at timestamptz NOT NULL DEFAULT now());
+CREATE TABLE sessions (token text PRIMARY KEY, user_id bigint NOT NULL REFERENCES users(id) ON DELETE CASCADE, created_at timestamptz NOT NULL DEFAULT now());
+CREATE TABLE messages (id bigserial PRIMARY KEY, to_user bigint NOT NULL REFERENCES users(id) ON DELETE CASCADE, from_user bigint NOT NULL REFERENCES users(id) ON DELETE CASCADE, body text NOT NULL CHECK (length(body) BETWEEN 1 AND 500), revealed boolean NOT NULL DEFAULT false, reply text, replied_at timestamptz, created_at timestamptz NOT NULL DEFAULT now());
+CREATE INDEX messages_to_idx ON messages (to_user, created_at DESC);
+CREATE INDEX messages_from_idx ON messages (from_user, created_at DESC);
+CREATE TABLE blocks (blocker bigint NOT NULL REFERENCES users(id) ON DELETE CASCADE, blocked bigint NOT NULL REFERENCES users(id) ON DELETE CASCADE, created_at timestamptz NOT NULL DEFAULT now(), PRIMARY KEY (blocker, blocked));
+CREATE TABLE reports (id bigserial PRIMARY KEY, message_id bigint NOT NULL REFERENCES messages(id) ON DELETE CASCADE, reporter bigint NOT NULL REFERENCES users(id) ON DELETE CASCADE, created_at timestamptz NOT NULL DEFAULT now());
