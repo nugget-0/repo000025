@@ -296,9 +296,9 @@ async function shareCard(m){
   const rr = (x, y, w, h, r) => { g.beginPath(); g.roundRect(x, y, w, h, r); };
   // message card
   g.font = '600 68px Rubik, sans-serif';
-  const msgLines = wrapLines(g, m.body, 780).slice(0, 10);
+  const msgLines = wrapLines(g, m.body, 700).slice(0, 10);
   g.font = '400 54px Rubik, sans-serif';
-  const repLines = m.reply ? wrapLines(g, m.reply, 760).slice(0, 8) : [];
+  const repLines = m.reply ? wrapLines(g, m.reply, 720).slice(0, 8) : [];
   const cardH = 170 + msgLines.length * 86 + (repLines.length ? 80 + repLines.length * 70 : 0);
   const top = Math.max(260, (H - cardH) / 2 - 80);
   g.fillStyle = 'rgba(0,0,0,.18)'; rr(110, top + 16, 860, cardH, 56); g.fill();
