@@ -70,7 +70,7 @@ async function getUser(req) {
   const auth = req.headers.get('authorization') || '';
   if (!auth.startsWith('Bearer ')) return null;
   const rows = await q(
-    'SELECT u.id, u.username, u.prompt FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token = $1 AND NOT u.banned',
+    'SELECT u.id, u.username, u.prompt, u.avatar FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token = $1 AND NOT u.banned',
     [sha(auth.slice(7))]
   );
   return rows[0] || null;
@@ -100,7 +100,7 @@ async function api(req, path) {
 
   if (path.startsWith('/api/profile/')) {
     const name = decodeURIComponent(path.slice(13)).toLowerCase();
-    const rows = await q('SELECT username, prompt FROM users WHERE username = $1', [name]);
+    const rows = await q('SELECT username, prompt, avatar FROM users WHERE username = $1', [name]);
     if (!rows.length) return err('No one with that username', 404);
     return json(rows[0]);
   }
@@ -113,7 +113,23 @@ async function api(req, path) {
 
   switch (path) {
     case '/api/me':
-      return json({ username: me.username, prompt: me.prompt, admin: me.username === ADMIN });
+    case '/api/unread': {
+      const n = await q('SELECT count(*) AS n FROM messages WHERE to_user = $1 AND NOT seen', [me.id]);
+      if (path === '/api/unread') return json({ unread: Number(n[0].n) });
+      return json({ username: me.username, prompt: me.prompt, avatar: me.avatar, unread: Number(n[0].n), admin: me.username === ADMIN });
+    }
+
+    case '/api/seen':
+      await q('UPDATE messages SET seen = true WHERE to_user = $1 AND NOT seen', [me.id]);
+      return json({ ok: true });
+
+    case '/api/avatar': {
+      // the browser shrinks the picture to a small JPEG before sending it
+      const img = body.image ? String(body.image) : null;
+      if (img && (!/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(img) || img.length > 150000)) return err('That picture is too big or not an image');
+      await q('UPDATE users SET avatar = $1 WHERE id = $2', [img, me.id]);
+      return json({ avatar: img });
+    }
 
     case '/api/logout':
       await q('DELETE FROM sessions WHERE token = $1', [sha((req.headers.get('authorization') || '').slice(7))]);
@@ -145,16 +161,17 @@ async function api(req, path) {
     case '/api/inbox': {
       // sender name only leaves the server if the sender chose to reveal
       const rows = await q(
-        `SELECT m.id, m.body, m.created_at, m.reply, m.revealed,
-                CASE WHEN m.revealed THEN u.username END AS from_name
+        `SELECT m.id, m.body, m.created_at, m.reply, m.revealed, m.seen,
+                CASE WHEN m.revealed THEN u.username END AS from_name,
+                CASE WHEN m.revealed THEN u.avatar END AS from_avatar
            FROM messages m JOIN users u ON u.id = m.from_user
           WHERE m.to_user = $1 ORDER BY m.created_at DESC LIMIT 100`, [me.id]);
-      return json(rows.map(r => ({ ...r, revealed: r.revealed === 't' || r.revealed === 'true' })));
+      return json(rows.map(r => ({ ...r, revealed: r.revealed === 't' || r.revealed === 'true', seen: r.seen === 't' || r.seen === 'true' })));
     }
 
     case '/api/sent': {
       const rows = await q(
-        `SELECT m.id, m.body, m.created_at, m.reply, m.revealed, u.username AS to_name
+        `SELECT m.id, m.body, m.created_at, m.reply, m.revealed, u.username AS to_name, u.avatar AS to_avatar
            FROM messages m JOIN users u ON u.id = m.to_user
           WHERE m.from_user = $1 ORDER BY m.created_at DESC LIMIT 100`, [me.id]);
       return json(rows.map(r => ({ ...r, revealed: r.revealed === 't' || r.revealed === 'true' })));
@@ -212,7 +229,7 @@ async function admin(path, body, me) {
       return json(r[0]);
     }
     case '/api/admin/users': {
-      const rows = await q(`SELECT u.id, u.username, u.prompt, u.banned, u.created_at,
+      const rows = await q(`SELECT u.id, u.username, u.prompt, u.avatar, u.banned, u.created_at,
         (SELECT count(*) FROM messages m WHERE m.from_user = u.id) AS sent,
         (SELECT count(*) FROM messages m WHERE m.to_user = u.id) AS received,
         (SELECT count(*) FROM reports r JOIN messages m ON m.id = r.message_id WHERE m.from_user = u.id) AS reported

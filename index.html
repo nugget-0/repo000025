@@ -49,6 +49,16 @@ button:disabled{opacity:.5}
 .empty{text-align:center;color:var(--mute);padding:20px 0}
 .toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:var(--ink);color:var(--y);padding:12px 18px;border-radius:14px;font-weight:600;display:none;z-index:9}
 .note{font-size:14px;color:var(--mute)}
+.av{width:var(--s,36px);height:var(--s,36px);border-radius:50%;object-fit:cover;flex:none;display:inline-grid;place-items:center;background:linear-gradient(135deg,#ec1187,#ffa94d);color:#fff;font-weight:800;font-size:calc(var(--s,36px)*.45);vertical-align:middle}
+.who-av{display:flex;align-items:center;gap:8px}
+.prof{display:flex;align-items:center;gap:14px;margin-bottom:14px}
+.prof .av{cursor:pointer}
+.chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+.chips button{min-height:34px;padding:5px 11px;font-size:13px;font-weight:600;background:var(--soft);color:var(--ink);border:1.5px solid #ddd;border-radius:999px}
+.chips button:hover{border-color:var(--ink)}
+.badge{display:inline-block;min-width:22px;padding:0 7px;margin-left:6px;border-radius:999px;background:var(--red);color:#fff;font-size:13px;line-height:22px}
+.new{border-color:var(--y2)!important;box-shadow:0 0 0 2px var(--y2)}
+.send-head{display:flex;flex-direction:column;align-items:center;gap:6px;margin-bottom:12px}
 .wrap.wide{max-width:980px}
 .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:10px;margin-top:14px}
 .stats div{background:var(--soft);border-radius:14px;padding:12px}
@@ -79,6 +89,28 @@ let me = null, tab = 'inbox', poll = null;
 
 function setToken(t){ token = t; try { t ? localStorage.setItem('wyspr_token', t) : localStorage.removeItem('wyspr_token'); } catch {} }
 function toast(t){ const el = $('#toast'); el.textContent = t; el.style.display = 'block'; clearTimeout(el._t); el._t = setTimeout(() => el.style.display = 'none', 2200); }
+const av = (src, name, s = 36) => src ? `<img class="av" style="--s:${s}px" src="${esc(src)}" alt="">`
+  : `<span class="av" style="--s:${s}px">${esc((name || '?')[0].toUpperCase())}</span>`;
+const PROMPTS = ['send me anonymous messages!', 'ask me anything', 'rate me 1–10 (be honest)', 'what was your first impression of me?',
+  'confess something 👀', 'tell me a secret', "what's one thing you'd change about me?", 'who do you think I have a crush on?',
+  'describe me in 3 words', 'never have I ever…', 'what song reminds you of me?', 'truth or dare?'];
+function setUnread(n){
+  me.unread = n;
+  const b = $('#t-in'); if (b) b.innerHTML = 'Inbox' + (n ? `<span class="badge">${n}</span>` : '');
+  document.title = (n ? `(${n}) ` : '') + 'Wyspr — anonymous messages';
+}
+// shrink a picked image to a small square JPEG in the browser
+function shrinkImage(file){
+  return new Promise((res, rej) => {
+    const img = new Image(), url = URL.createObjectURL(file);
+    img.onload = () => { const S = 160, c = document.createElement('canvas'); c.width = c.height = S;
+      const m = Math.min(img.width, img.height);
+      c.getContext('2d').drawImage(img, (img.width - m) / 2, (img.height - m) / 2, m, m, 0, 0, S, S);
+      URL.revokeObjectURL(url); res(c.toDataURL('image/jpeg', 0.82)); };
+    img.onerror = () => rej(new Error("Couldn't read that picture"));
+    img.src = url;
+  });
+}
 function ago(ts){ const s = (Date.now() - new Date(ts)) / 1000; if (s < 60) return 'just now'; if (s < 3600) return Math.floor(s/60) + 'm ago'; if (s < 86400) return Math.floor(s/3600) + 'h ago'; return Math.floor(s/86400) + 'd ago'; }
 
 async function call(path, body){
@@ -95,7 +127,7 @@ async function call(path, body){
 
 function renderWho(){
   $('#who').innerHTML = me
-    ? `<span>@${esc(me.username)}</span>${me.admin ? '<button class="small ghost" id="adm">Admin</button>' : ''}<button class="small ghost" id="out">Log out</button>`
+    ? `<span class="who-av">${av(me.avatar, me.username, 30)}@${esc(me.username)}</span>${me.admin ? '<button class="small ghost" id="adm">Admin</button>' : ''}<button class="small ghost" id="out">Log out</button>`
     : '';
   if (me && me.admin) $('#adm').onclick = () => { history.pushState(null, '', '/admin'); adminPage(); };
   if (me) $('#out').onclick = async () => { try { await call('logout', {}); } catch {} setToken(null); me = null; location.href = '/'; };
@@ -130,7 +162,7 @@ async function sendPage(name){
   catch (x) { app.innerHTML = `<div class="card"><h2>${esc(x.message)}</h2><a href="/">Go home</a></div>`; return; }
   if (!me) { authForm(`Sign in to message @${prof.username}`, () => sendPage(name)); return; }
   let draft = ''; try { draft = sessionStorage.getItem('wyspr_draft_' + name) || ''; } catch {}
-  app.innerHTML = `<div class="card"><div class="meta">@${esc(prof.username)}</div>
+  app.innerHTML = `<div class="card"><div class="send-head">${av(prof.avatar, prof.username, 72)}<b>@${esc(prof.username)}</b></div>
     <div class="bubble">${esc(prof.prompt)}</div>
     <form id="sf"><textarea id="t" maxlength="500" placeholder="send me anonymous messages...">${esc(draft)}</textarea>
     <label class="check"><input type="checkbox" id="rv"> Let them know it's me (@${esc(me.username)})</label>
@@ -151,18 +183,31 @@ async function sendPage(name){
 // ---------- home: link, prompt, inbox, sent ----------
 function home(){
   const link = location.origin + '/u/' + me.username;
-  app.innerHTML = `<div class="card"><h2>Your link</h2>
+  app.innerHTML = `<div class="card"><div class="prof"><label title="Change profile picture">${av(me.avatar, me.username, 64)}<input type="file" id="pic" accept="image/*" hidden></label>
+      <div><b>@${esc(me.username)}</b><div class="row" style="margin-top:4px"><button class="small ghost" id="pc">${me.avatar ? 'Change photo' : 'Add photo'}</button>${me.avatar ? '<button class="small ghost" id="pr0">Remove</button>' : ''}</div></div></div>
+      <h2>Your link</h2>
       <div class="link"><input readonly value="${esc(link)}" id="lk"><button id="cp">Copy</button></div>
       <p class="note" style="margin-bottom:6px">Put it in your story or bio. Your prompt:</p>
-      <div class="link"><input id="pr" maxlength="120" value="${esc(me.prompt)}"><button class="ghost" id="ps">Save</button></div></div>
+      <div class="link"><input id="pr" maxlength="120" value="${esc(me.prompt)}"><button class="ghost" id="ps">Save</button></div>
+      <div class="chips">${PROMPTS.map(p => `<button data-p="${esc(p)}">${esc(p)}</button>`).join('')}</div></div>
     <div class="tabs"><button id="t-in" class="${tab==='inbox'?'on':''}">Inbox</button><button id="t-sent" class="${tab==='sent'?'on':''}">Sent</button></div>
     <div id="list"><div class="empty">Loading…</div></div>`;
   $('#cp').onclick = async () => { try { await navigator.clipboard.writeText(link); toast('Link copied'); } catch { $('#lk').select(); toast('Select + copy the link'); } };
   $('#ps').onclick = async () => { try { const d = await call('prompt', { prompt: $('#pr').value }); me.prompt = d.prompt; toast('Prompt saved'); } catch (x) { toast(x.message); } };
+  document.querySelector('.chips').onclick = async e => { const b = e.target.closest('button[data-p]'); if (!b) return;
+    $('#pr').value = b.dataset.p; try { const d = await call('prompt', { prompt: b.dataset.p }); me.prompt = d.prompt; toast('Prompt set'); } catch (x) { toast(x.message); } };
+  $('#pc').onclick = () => $('#pic').click();
+  $('#pic').onchange = async e => { const f = e.target.files[0]; if (!f) return;
+    try { const d = await call('avatar', { image: await shrinkImage(f) }); me.avatar = d.avatar; toast('Photo updated'); renderWho(); home(); } catch (x) { toast(x.message); } };
+  if ($('#pr0')) $('#pr0').onclick = async () => { try { await call('avatar', { image: null }); me.avatar = null; renderWho(); home(); } catch (x) { toast(x.message); } };
+  setUnread(me.unread || 0);
   $('#t-in').onclick = () => { tab = 'inbox'; home(); };
   $('#t-sent').onclick = () => { tab = 'sent'; home(); };
   loadList();
-  clearInterval(poll); poll = setInterval(() => { if (!document.hidden && !document.querySelector('#list textarea')) loadList(); }, 15000);
+  clearInterval(poll); poll = setInterval(async () => {
+    if (document.hidden || document.querySelector('#list textarea')) return;
+    if (tab === 'inbox') loadList(); else { try { setUnread((await call('unread')).unread); } catch {} }
+  }, 15000);
 }
 
 async function loadList(){
@@ -171,8 +216,8 @@ async function loadList(){
   try { rows = await call(tab); } catch (x) { list.innerHTML = `<div class="err">${esc(x.message)}</div>`; return; }
   if (!rows.length) { list.innerHTML = `<div class="empty">${tab==='inbox' ? 'No messages yet — share your link!' : "You haven't sent anything yet."}</div>`; return; }
   list.innerHTML = rows.map(m => tab === 'inbox' ? `
-    <div class="msg" data-id="${m.id}">
-      <div class="meta">${m.revealed ? 'from <b>@' + esc(m.from_name) + '</b>' : 'from <b>anonymous</b>'} · ${ago(m.created_at)}</div>
+    <div class="msg${m.seen ? '' : ' new'}" data-id="${m.id}">
+      <div class="meta">${m.revealed ? av(m.from_avatar, m.from_name, 24) + ' from <b>@' + esc(m.from_name) + '</b>' : 'from <b>anonymous</b>'} · ${ago(m.created_at)}${m.seen ? '' : ' · <b style="color:var(--y2)">new</b>'}</div>
       <div class="text">${esc(m.body)}</div>
       ${m.reply ? `<div class="reply"><b>You:</b> ${esc(m.reply)}</div>` : ''}
       <div class="row"><button class="small" data-a="reply">${m.reply ? 'Edit reply' : 'Reply'}</button>
@@ -181,11 +226,12 @@ async function loadList(){
         <button class="small danger" data-a="report">Report</button></div>
     </div>` : `
     <div class="msg" data-id="${m.id}">
-      <div class="meta">to <b>@${esc(m.to_name)}</b> · ${ago(m.created_at)} · ${m.revealed ? 'they know it\'s you' : 'anonymous'}</div>
+      <div class="meta">${av(m.to_avatar, m.to_name, 24)} to <b>@${esc(m.to_name)}</b> · ${ago(m.created_at)} · ${m.revealed ? 'they know it\'s you' : 'anonymous'}</div>
       <div class="text">${esc(m.body)}</div>
       ${m.reply ? `<div class="reply"><b>@${esc(m.to_name)}:</b> ${esc(m.reply)}</div>` : ''}
       ${m.revealed ? '' : '<div class="row"><button class="small ghost" data-a="reveal">Reveal it\'s me</button></div>'}
     </div>`).join('');
+  if (tab === 'inbox' && rows.some(m => !m.seen)) { try { await call('seen', {}); } catch {} setUnread(0); }
 }
 
 $('#app').addEventListener('click', async e => {
@@ -229,7 +275,7 @@ async function adminUsers(){
   const box = $('#alist'); let rows;
   try { rows = await call('admin/users'); } catch (x) { box.innerHTML = `<div class="err">${esc(x.message)}</div>`; return; }
   box.innerHTML = `<input id="us" placeholder="Search users…"><div class="scroll"><table class="at"><thead><tr><th>User</th><th>Joined</th><th>Sent</th><th>Got</th><th>Reported</th><th></th></tr></thead><tbody>${
-    rows.map(u => `<tr data-u="${esc(u.username)}"><td><b>@${esc(u.username)}</b>${u.banned ? ' <span class="tag">banned</span>' : ''}<div class="note">${esc(u.prompt)}</div></td>
+    rows.map(u => `<tr data-u="${esc(u.username)}"><td>${av(u.avatar, u.username, 28)} <b>@${esc(u.username)}</b>${u.banned ? ' <span class="tag">banned</span>' : ''}<div class="note">${esc(u.prompt)}</div></td>
       <td>${ago(u.created_at)}</td><td class="n">${u.sent}</td><td class="n">${u.received}</td><td class="n">${u.reported}</td>
       <td><div class="row"><button class="small ghost" data-x="view">Messages</button>${u.username === me.username ? '' :
         `<button class="small danger" data-x="${u.banned ? 'unban' : 'ban'}">${u.banned ? 'Unban' : 'Ban'}</button>`}</div></td></tr>`).join('')}</tbody></table></div>`;
