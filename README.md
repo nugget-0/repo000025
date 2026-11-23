@@ -2,10 +2,12 @@
 
 Anonymous messages, but with accounts. Senders must sign in, so the receiver sees "anonymous" while the server can still enforce blocks, rate limits and reports. Senders can choose to reveal themselves.
 
-API (Neon Function `psst`): https://br-empty-fog-az0bothu-psst.compute.c-3.ap-southeast-1.aws.neon.tech/ — the page is hosted on Vercel
+The page is hosted on Vercel; the API runs on a Neon Function.
 
-- `server.mjs`: Neon Function (API + serves the page). Talks to Postgres over Neon's HTTP SQL endpoint, so there are no dependencies.
-- `index.html`: the whole frontend (works on Vercel too; it calls the Neon API). Share links look like `/u/username`.
+- `index.html`: the whole frontend, hosted on Vercel. Calls the API on Neon.
+- `server.mjs`: the API. The Neon Function `wyspr` is a small loader that pulls this file from GitHub (main) about once a minute, so pushing changes here updates the live API — no redeploy needed.
+- `loader.mjs`: that loader (what's actually deployed on Neon).
 - `schema.sql`: database tables (Neon project `nuggetngl`).
-- `build.mjs`: `node build.mjs` puts the page into the server and writes `dist/index.mjs`, which gets zipped and deployed as the `psst` function.
-- `vercel.json`: makes `/u/username` links load the page on Vercel.
+- `vercel.json`: makes `/u/username` and `/admin` load the page on Vercel.
+
+Admin panel: sign in as @nugget and click **Admin** (or go to `/admin`). Shows stats, every user, every message with sender and receiver, reports, and lets you delete messages and ban/unban accounts.

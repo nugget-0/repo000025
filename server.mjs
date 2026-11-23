@@ -1,7 +1,8 @@
 import { randomBytes, scryptSync, timingSafeEqual, createHash } from 'node:crypto';
 
-// HTML is injected at build time
-const PAGE = __PAGE_HTML__;
+// The site itself is hosted on Vercel (index.html); this only serves the API.
+const PAGE = 'Wyspr API';
+const ADMIN = 'nugget';
 
 // ---------- database over Neon's HTTP SQL endpoint (no driver needed) ----------
 const DB_URL = process.env.DATABASE_URL || process.env.DB_URL;
@@ -69,7 +70,7 @@ async function getUser(req) {
   const auth = req.headers.get('authorization') || '';
   if (!auth.startsWith('Bearer ')) return null;
   const rows = await q(
-    'SELECT u.id, u.username, u.prompt FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token = $1',
+    'SELECT u.id, u.username, u.prompt FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token = $1 AND NOT u.banned',
     [sha(auth.slice(7))]
   );
   return rows[0] || null;
@@ -91,8 +92,9 @@ async function api(req, path) {
       const rows = await q('INSERT INTO users (username, pass_hash) VALUES ($1, $2) RETURNING id', [username, hashPass(password)]);
       return json({ token: await newSession(rows[0].id), username });
     }
-    const rows = await q('SELECT id, pass_hash FROM users WHERE username = $1', [username]);
+    const rows = await q('SELECT id, pass_hash, banned FROM users WHERE username = $1', [username]);
     if (!rows.length || !checkPass(password, rows[0].pass_hash)) return err('Wrong username or password', 401);
+    if (rows[0].banned === 't' || rows[0].banned === 'true') return err('This account is banned', 403);
     return json({ token: await newSession(rows[0].id), username });
   }
 
@@ -107,9 +109,11 @@ async function api(req, path) {
   const me = await getUser(req);
   if (!me) return err('Sign in first', 401);
 
+  if (path.startsWith('/api/admin/')) return admin(path, body, me);
+
   switch (path) {
     case '/api/me':
-      return json({ username: me.username, prompt: me.prompt });
+      return json({ username: me.username, prompt: me.prompt, admin: me.username === ADMIN });
 
     case '/api/logout':
       await q('DELETE FROM sessions WHERE token = $1', [sha((req.headers.get('authorization') || '').slice(7))]);
@@ -190,6 +194,51 @@ async function api(req, path) {
       const rows = await q('SELECT 1 FROM messages WHERE id = $1 AND to_user = $2', [body.id, me.id]);
       if (!rows.length) return err('Not your message', 404);
       await q('INSERT INTO reports (message_id, reporter) VALUES ($1, $2)', [body.id, me.id]);
+      return json({ ok: true });
+    }
+  }
+  return err('Not found', 404);
+}
+
+// ---------- admin (only @nugget) ----------
+const bool = v => v === 't' || v === 'true' || v === true;
+async function admin(path, body, me) {
+  if (me.username !== ADMIN) return err('Admins only', 403);
+  switch (path) {
+    case '/api/admin/stats': {
+      const r = await q(`SELECT (SELECT count(*) FROM users) AS users, (SELECT count(*) FROM messages) AS messages,
+        (SELECT count(*) FROM messages WHERE created_at > now() - interval '1 day') AS messages_24h,
+        (SELECT count(*) FROM reports) AS reports, (SELECT count(*) FROM users WHERE banned) AS banned`);
+      return json(r[0]);
+    }
+    case '/api/admin/users': {
+      const rows = await q(`SELECT u.id, u.username, u.prompt, u.banned, u.created_at,
+        (SELECT count(*) FROM messages m WHERE m.from_user = u.id) AS sent,
+        (SELECT count(*) FROM messages m WHERE m.to_user = u.id) AS received,
+        (SELECT count(*) FROM reports r JOIN messages m ON m.id = r.message_id WHERE m.from_user = u.id) AS reported
+        FROM users u ORDER BY u.created_at DESC LIMIT 500`);
+      return json(rows.map(r => ({ ...r, banned: bool(r.banned) })));
+    }
+    case '/api/admin/messages': {
+      const user = String(body.user || '').toLowerCase();
+      const rows = await q(`SELECT m.id, m.body, m.created_at, m.reply, m.revealed, f.username AS from_name, t.username AS to_name,
+        (SELECT count(*) FROM reports r WHERE r.message_id = m.id) AS reports
+        FROM messages m JOIN users f ON f.id = m.from_user JOIN users t ON t.id = m.to_user
+        WHERE ($1 = '' OR f.username = $1 OR t.username = $1) AND ($2 = 'false' OR EXISTS (SELECT 1 FROM reports r WHERE r.message_id = m.id))
+        ORDER BY m.created_at DESC LIMIT 300`, [user, body.reported ? 'true' : 'false']);
+      return json(rows.map(r => ({ ...r, revealed: bool(r.revealed) })));
+    }
+    case '/api/admin/delete': {
+      await q('DELETE FROM messages WHERE id = $1', [body.id]);
+      return json({ ok: true });
+    }
+    case '/api/admin/ban': {
+      const name = String(body.username || '').toLowerCase();
+      if (name === ADMIN) return err("Can't ban the admin");
+      const ban = body.ban ? 'true' : 'false';
+      const rows = await q('UPDATE users SET banned = $1 WHERE username = $2 RETURNING id', [ban, name]);
+      if (!rows.length) return err('No such user', 404);
+      if (body.ban) await q('DELETE FROM sessions WHERE user_id = $1', [rows[0].id]);
       return json({ ok: true });
     }
   }

@@ -49,6 +49,16 @@ button:disabled{opacity:.5}
 .empty{text-align:center;color:var(--mute);padding:20px 0}
 .toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:var(--ink);color:var(--y);padding:12px 18px;border-radius:14px;font-weight:600;display:none;z-index:9}
 .note{font-size:14px;color:var(--mute)}
+.wrap.wide{max-width:980px}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:10px;margin-top:14px}
+.stats div{background:var(--soft);border-radius:14px;padding:12px}
+.stats b{display:block;font-size:26px;line-height:1.1}.stats span{color:var(--mute);font-size:14px}
+.scroll{overflow-x:auto}
+.at{width:100%;border-collapse:collapse;font-size:15px}
+.at th{text-align:left;color:var(--mute);font-weight:600;padding:8px;border-bottom:2px solid #eee;white-space:nowrap}
+.at td{padding:10px 8px;border-bottom:1px solid #eee;vertical-align:top}
+.at td.n{text-align:right}
+.tag{background:var(--red);color:#fff;border-radius:8px;padding:1px 7px;font-size:12px;font-weight:600}
 @media(prefers-reduced-motion:no-preference){.card{animation:pop .25s ease-out}@keyframes pop{from{transform:translateY(8px);opacity:0}}}
 </style>
 </head>
@@ -60,7 +70,7 @@ button:disabled{opacity:.5}
 <div class="toast" id="toast"></div>
 <script>
 {
-const API = window.WYSPR_API || (location.hostname.endsWith('neon.tech') ? '' : 'https://br-empty-fog-az0bothu-psst.compute.c-3.ap-southeast-1.aws.neon.tech');
+const API = window.WYSPR_API || (location.hostname.endsWith('neon.tech') ? '' : 'https://br-empty-fog-az0bothu-wyspr.compute.c-3.ap-southeast-1.aws.neon.tech');
 const $ = s => document.querySelector(s);
 const app = $('#app');
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -85,8 +95,9 @@ async function call(path, body){
 
 function renderWho(){
   $('#who').innerHTML = me
-    ? `<span>@${esc(me.username)}</span><button class="small ghost" id="out">Log out</button>`
+    ? `<span>@${esc(me.username)}</span>${me.admin ? '<button class="small ghost" id="adm">Admin</button>' : ''}<button class="small ghost" id="out">Log out</button>`
     : '';
+  if (me && me.admin) $('#adm').onclick = () => { history.pushState(null, '', '/admin'); adminPage(); };
   if (me) $('#out').onclick = async () => { try { await call('logout', {}); } catch {} setToken(null); me = null; location.href = '/'; };
 }
 
@@ -198,12 +209,70 @@ $('#app').addEventListener('click', async e => {
   } catch (x) { toast(x.message); }
 });
 
+// ---------- admin panel (only @nugget; the server checks too) ----------
+let aTab = 'users', aUser = '', aReported = false;
+async function adminPage(){
+  clearInterval(poll);
+  document.querySelector('.wrap').classList.add('wide');
+  let stats = {};
+  try { stats = await call('admin/stats'); } catch (x) { app.innerHTML = `<div class="card err">${esc(x.message)}</div>`; return; }
+  app.innerHTML = `<div class="card"><div class="row" style="justify-content:space-between"><h2 style="margin:0">Admin</h2><a href="/"><button class="small ghost">Back to inbox</button></a></div>
+      <div class="stats">${[['Users',stats.users],['Messages',stats.messages],['Last 24h',stats.messages_24h],['Reports',stats.reports],['Banned',stats.banned]]
+        .map(([k,v]) => `<div><b>${esc(v)}</b><span>${k}</span></div>`).join('')}</div></div>
+    <div class="tabs"><button id="a-u" class="${aTab==='users'?'on':''}">Users</button><button id="a-m" class="${aTab==='messages'?'on':''}">Messages</button></div>
+    <div class="card" id="alist"><div class="empty">Loading…</div></div>`;
+  $('#a-u').onclick = () => { aTab = 'users'; adminPage(); };
+  $('#a-m').onclick = () => { aTab = 'messages'; adminPage(); };
+  aTab === 'users' ? adminUsers() : adminMessages();
+}
+async function adminUsers(){
+  const box = $('#alist'); let rows;
+  try { rows = await call('admin/users'); } catch (x) { box.innerHTML = `<div class="err">${esc(x.message)}</div>`; return; }
+  box.innerHTML = `<input id="us" placeholder="Search users…"><div class="scroll"><table class="at"><thead><tr><th>User</th><th>Joined</th><th>Sent</th><th>Got</th><th>Reported</th><th></th></tr></thead><tbody>${
+    rows.map(u => `<tr data-u="${esc(u.username)}"><td><b>@${esc(u.username)}</b>${u.banned ? ' <span class="tag">banned</span>' : ''}<div class="note">${esc(u.prompt)}</div></td>
+      <td>${ago(u.created_at)}</td><td class="n">${u.sent}</td><td class="n">${u.received}</td><td class="n">${u.reported}</td>
+      <td><div class="row"><button class="small ghost" data-x="view">Messages</button>${u.username === me.username ? '' :
+        `<button class="small danger" data-x="${u.banned ? 'unban' : 'ban'}">${u.banned ? 'Unban' : 'Ban'}</button>`}</div></td></tr>`).join('')}</tbody></table></div>`;
+  $('#us').oninput = e => { const s = e.target.value.toLowerCase(); box.querySelectorAll('tbody tr').forEach(tr => tr.style.display = tr.dataset.u.includes(s) ? '' : 'none'); };
+  box.onclick = async e => {
+    const b = e.target.closest('button[data-x]'); if (!b) return;
+    const name = b.closest('tr').dataset.u, x = b.dataset.x;
+    if (x === 'view') { aTab = 'messages'; aUser = name; aReported = false; return adminPage(); }
+    if (!b.dataset.sure) { b.dataset.sure = 1; b.textContent = 'Sure?'; return; }
+    try { await call('admin/ban', { username: name, ban: x === 'ban' }); toast(x === 'ban' ? `Banned @${name}` : `Unbanned @${name}`); adminPage(); } catch (x2) { toast(x2.message); }
+  };
+}
+async function adminMessages(){
+  const box = $('#alist'); let rows;
+  try { rows = await call('admin/messages', { user: aUser, reported: aReported }); } catch (x) { box.innerHTML = `<div class="err">${esc(x.message)}</div>`; return; }
+  box.innerHTML = `<div class="row" style="margin-bottom:10px"><input id="mu" style="margin:0;flex:1" placeholder="Filter by username (from or to)" value="${esc(aUser)}">
+      <label class="check" style="margin:0"><input type="checkbox" id="mr" ${aReported ? 'checked' : ''}> Reported only</label></div>
+    ${rows.length ? rows.map(m => `<div class="msg" data-id="${m.id}">
+      <div class="meta"><b>@${esc(m.from_name)}</b> → <b>@${esc(m.to_name)}</b> · ${ago(m.created_at)} · ${m.revealed ? 'revealed' : 'anonymous to them'}${Number(m.reports) ? ` · <span class="tag">${m.reports} report${m.reports == 1 ? '' : 's'}</span>` : ''}</div>
+      <div class="text">${esc(m.body)}</div>
+      ${m.reply ? `<div class="reply"><b>@${esc(m.to_name)}:</b> ${esc(m.reply)}</div>` : ''}
+      <div class="row"><button class="small danger" data-x="del">Delete message</button><button class="small danger" data-x="ban" data-n="${esc(m.from_name)}">Ban @${esc(m.from_name)}</button></div></div>`).join('')
+      : '<div class="empty">No messages match.</div>'}`;
+  let t; $('#mu').oninput = e => { clearTimeout(t); t = setTimeout(() => { aUser = e.target.value.trim().toLowerCase().replace(/^@/, ''); adminMessages(); }, 400); };
+  $('#mr').onchange = e => { aReported = e.target.checked; adminMessages(); };
+  box.onclick = async e => {
+    const b = e.target.closest('button[data-x]'); if (!b) return;
+    if (!b.dataset.sure) { b.dataset.sure = 1; b.textContent = 'Sure?'; return; }
+    try {
+      if (b.dataset.x === 'del') { await call('admin/delete', { id: b.closest('.msg').dataset.id }); toast('Deleted'); }
+      else { await call('admin/ban', { username: b.dataset.n, ban: true }); toast(`Banned @${b.dataset.n}`); }
+      adminMessages();
+    } catch (x) { toast(x.message); }
+  };
+}
+
 // ---------- start ----------
 (async () => {
   if (token) { try { me = await call('me'); } catch { me = null; } }
   renderWho();
   const m = location.pathname.match(/^\/u\/([^/]+)/);
   if (m) sendPage(decodeURIComponent(m[1]));
+  else if (location.pathname.startsWith('/admin') && me && me.admin) adminPage();
   else if (me) home();
   else authForm('Get anonymous messages from your friends', home);
 })();

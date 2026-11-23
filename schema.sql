@@ -5,3 +5,4 @@ CREATE INDEX messages_to_idx ON messages (to_user, created_at DESC);
 CREATE INDEX messages_from_idx ON messages (from_user, created_at DESC);
 CREATE TABLE blocks (blocker bigint NOT NULL REFERENCES users(id) ON DELETE CASCADE, blocked bigint NOT NULL REFERENCES users(id) ON DELETE CASCADE, created_at timestamptz NOT NULL DEFAULT now(), PRIMARY KEY (blocker, blocked));
 CREATE TABLE reports (id bigserial PRIMARY KEY, message_id bigint NOT NULL REFERENCES messages(id) ON DELETE CASCADE, reporter bigint NOT NULL REFERENCES users(id) ON DELETE CASCADE, created_at timestamptz NOT NULL DEFAULT now());
+ALTER TABLE users ADD COLUMN banned boolean NOT NULL DEFAULT false;
