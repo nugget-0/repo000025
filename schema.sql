@@ -8,3 +8,4 @@ CREATE TABLE reports (id bigserial PRIMARY KEY, message_id bigint NOT NULL REFER
 ALTER TABLE users ADD COLUMN banned boolean NOT NULL DEFAULT false;
 ALTER TABLE users ADD COLUMN avatar text;
 ALTER TABLE messages ADD COLUMN seen boolean NOT NULL DEFAULT false;
+CREATE TABLE guesses (id bigserial PRIMARY KEY, message_id bigint NOT NULL REFERENCES messages(id) ON DELETE CASCADE, guess text NOT NULL, correct boolean NOT NULL, created_at timestamptz NOT NULL DEFAULT now());

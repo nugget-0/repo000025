@@ -163,18 +163,37 @@ async function api(req, path) {
       const rows = await q(
         `SELECT m.id, m.body, m.created_at, m.reply, m.revealed, m.seen,
                 CASE WHEN m.revealed THEN u.username END AS from_name,
-                CASE WHEN m.revealed THEN u.avatar END AS from_avatar
+                CASE WHEN m.revealed THEN u.avatar END AS from_avatar,
+                (SELECT string_agg(g.guess, ',' ORDER BY g.id) FROM guesses g WHERE g.message_id = m.id) AS guesses
            FROM messages m JOIN users u ON u.id = m.from_user
           WHERE m.to_user = $1 ORDER BY m.created_at DESC LIMIT 100`, [me.id]);
-      return json(rows.map(r => ({ ...r, revealed: r.revealed === 't' || r.revealed === 'true', seen: r.seen === 't' || r.seen === 'true' })));
+      return json(rows.map(r => ({ ...r, revealed: r.revealed === 't' || r.revealed === 'true', seen: r.seen === 't' || r.seen === 'true',
+        guesses: r.guesses ? r.guesses.split(',') : [] })));
+    }
+
+    case '/api/guess': {
+      // the guesser is NOT told if they're right (that would unmask the sender);
+      // a right guess lets the sender know, and the sender decides whether to reveal
+      const guess = String(body.username || '').trim().toLowerCase().replace(/^@/, '');
+      if (!USERNAME_RE.test(guess)) return err('Type a username');
+      const rows = await q(`SELECT m.revealed, u.username AS from_name, (SELECT count(*) FROM guesses g WHERE g.message_id = m.id) AS n
+        FROM messages m JOIN users u ON u.id = m.from_user WHERE m.id = $1 AND m.to_user = $2`, [body.id, me.id]);
+      if (!rows.length) return err('Not your message', 404);
+      if (rows[0].revealed === 't' || rows[0].revealed === 'true') return err('They already revealed themselves');
+      if (Number(rows[0].n) >= 3) return err('No guesses left on this one');
+      await q('INSERT INTO guesses (message_id, guess, correct) VALUES ($1, $2, $3)', [body.id, guess, guess === rows[0].from_name ? 'true' : 'false']);
+      return json({ ok: true, left: 2 - Number(rows[0].n) });
     }
 
     case '/api/sent': {
       const rows = await q(
-        `SELECT m.id, m.body, m.created_at, m.reply, m.revealed, u.username AS to_name, u.avatar AS to_avatar
+        `SELECT m.id, m.body, m.created_at, m.reply, m.revealed, u.username AS to_name, u.avatar AS to_avatar,
+                (SELECT count(*) FROM guesses g WHERE g.message_id = m.id) AS guess_count,
+                EXISTS (SELECT 1 FROM guesses g WHERE g.message_id = m.id AND g.correct) AS guessed
            FROM messages m JOIN users u ON u.id = m.to_user
           WHERE m.from_user = $1 ORDER BY m.created_at DESC LIMIT 100`, [me.id]);
-      return json(rows.map(r => ({ ...r, revealed: r.revealed === 't' || r.revealed === 'true' })));
+      return json(rows.map(r => ({ ...r, revealed: r.revealed === 't' || r.revealed === 'true',
+        guessed: r.guessed === 't' || r.guessed === 'true', guess_count: Number(r.guess_count) })));
     }
 
     case '/api/reveal': {

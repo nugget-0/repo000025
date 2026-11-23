@@ -57,6 +57,9 @@ button:disabled{opacity:.5}
 .chips button{min-height:34px;padding:5px 11px;font-size:13px;font-weight:600;background:var(--soft);color:var(--ink);border:1.5px solid #ddd;border-radius:999px}
 .chips button:hover{border-color:var(--ink)}
 .badge{display:inline-block;min-width:22px;padding:0 7px;margin-left:6px;border-radius:999px;background:var(--red);color:#fff;font-size:13px;line-height:22px}
+.guessed{background:#fff3c4;border-radius:12px;padding:8px 12px;font-weight:600;margin-bottom:8px}
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.55);display:grid;place-items:center;padding:16px;z-index:20}
+.modal .card{width:min(420px,100%);max-height:94vh;overflow:auto}
 .new{border-color:var(--y2)!important;box-shadow:0 0 0 2px var(--y2)}
 .send-head{display:flex;flex-direction:column;align-items:center;gap:6px;margin-bottom:12px}
 .wrap.wide{max-width:980px}
@@ -205,7 +208,7 @@ function home(){
   $('#t-sent').onclick = () => { tab = 'sent'; home(); };
   loadList();
   clearInterval(poll); poll = setInterval(async () => {
-    if (document.hidden || document.querySelector('#list textarea')) return;
+    if (document.hidden || document.querySelector('#list textarea, #list input, .modal')) return;
     if (tab === 'inbox') loadList(); else { try { setUnread((await call('unread')).unread); } catch {} }
   }, 15000);
 }
@@ -220,7 +223,10 @@ async function loadList(){
       <div class="meta">${m.revealed ? av(m.from_avatar, m.from_name, 24) + ' from <b>@' + esc(m.from_name) + '</b>' : 'from <b>anonymous</b>'} · ${ago(m.created_at)}${m.seen ? '' : ' · <b style="color:var(--y2)">new</b>'}</div>
       <div class="text">${esc(m.body)}</div>
       ${m.reply ? `<div class="reply"><b>You:</b> ${esc(m.reply)}</div>` : ''}
+      ${!m.revealed && m.guesses.length ? `<div class="note" style="margin-bottom:8px">Your guesses: ${m.guesses.map(g => '@' + esc(g)).join(', ')} · ${3 - m.guesses.length} left</div>` : ''}
       <div class="row"><button class="small" data-a="reply">${m.reply ? 'Edit reply' : 'Reply'}</button>
+        <button class="small" data-a="share">Share</button>
+        ${!m.revealed && m.guesses.length < 3 ? '<button class="small ghost" data-a="guess">Guess who 🤔</button>' : ''}
         <button class="small ghost" data-a="delete">Delete</button>
         <button class="small danger" data-a="block">Block sender</button>
         <button class="small danger" data-a="report">Report</button></div>
@@ -229,8 +235,11 @@ async function loadList(){
       <div class="meta">${av(m.to_avatar, m.to_name, 24)} to <b>@${esc(m.to_name)}</b> · ${ago(m.created_at)} · ${m.revealed ? 'they know it\'s you' : 'anonymous'}</div>
       <div class="text">${esc(m.body)}</div>
       ${m.reply ? `<div class="reply"><b>@${esc(m.to_name)}:</b> ${esc(m.reply)}</div>` : ''}
+      ${!m.revealed && m.guessed ? `<div class="guessed">👀 @${esc(m.to_name)} guessed it's you!</div>` : ''}
+      ${!m.revealed && !m.guessed && m.guess_count ? `<div class="note" style="margin-bottom:8px">They've guessed ${m.guess_count} time${m.guess_count === 1 ? '' : 's'} — not you (yet)</div>` : ''}
       ${m.revealed ? '' : '<div class="row"><button class="small ghost" data-a="reveal">Reveal it\'s me</button></div>'}
     </div>`).join('');
+  rowsById = Object.fromEntries(rows.map(m => [m.id, m]));
   if (tab === 'inbox' && rows.some(m => !m.seen)) { try { await call('seen', {}); } catch {} setUnread(0); }
 }
 
@@ -243,17 +252,86 @@ $('#app').addEventListener('click', async e => {
     box.querySelector('textarea').focus(); return;
   }
   if (a === 'cancel') { b.parentElement.parentElement.remove(); return; }
+  if (a === 'guess') {
+    if (box.querySelector('.gform')) return;
+    box.insertAdjacentHTML('beforeend', `<div class="gform" style="margin-top:10px"><p class="note" style="margin:0 0 6px">Who do you think sent it? You won't be told if you're right — but if you are, they'll find out and can choose to reveal.</p>
+      <div class="link"><input placeholder="@username" autocapitalize="none" style="margin:0"><button class="small" data-a="sendguess">Guess</button><button class="small ghost" data-a="cancel">Cancel</button></div></div>`);
+    box.querySelector('.gform input').focus(); return;
+  }
+  if (a === 'share') { shareCard(rowsById[id]); return; }
   if (['block','report','delete','reveal'].includes(a) && !b.dataset.sure) {
     b.dataset.sure = 1; const old = b.textContent; b.textContent = 'Sure?';
     setTimeout(() => { if (b.isConnected) { delete b.dataset.sure; b.textContent = old; } }, 3000); return;
   }
   try {
     if (a === 'sendreply') await call('reply', { id, text: box.querySelector('textarea').value });
+    else if (a === 'sendguess') await call('guess', { id, username: box.querySelector('.gform input').value });
     else await call(a, { id });
-    toast({ sendreply: 'Reply saved', block: 'Blocked — their messages are gone', report: 'Reported, thanks', delete: 'Deleted', reveal: "Revealed — they'll see your name" }[a]);
+    toast({ sendguess: 'Guess locked in 🤞', sendreply: 'Reply saved', block: 'Blocked — their messages are gone', report: 'Reported, thanks', delete: 'Deleted', reveal: "Revealed — they'll see your name" }[a]);
     loadList();
   } catch (x) { toast(x.message); }
 });
+
+// ---------- share card: message + reply as a story image ----------
+let rowsById = {};
+function wrapLines(g, text, maxW){
+  const out = [];
+  for (const para of String(text).split('\n')) {
+    let line = '';
+    for (const w of para.split(' ')) {
+      const t = line ? line + ' ' + w : w;
+      if (g.measureText(t).width > maxW && line) { out.push(line); line = w; } else line = t;
+    }
+    out.push(line);
+  }
+  return out;
+}
+async function shareCard(m){
+  if (!m) return;
+  try { await document.fonts.load('800 60px Rubik'); await document.fonts.load('600 40px Rubik'); } catch {}
+  const W = 1080, H = 1920, c = document.createElement('canvas'); c.width = W; c.height = H;
+  const g = c.getContext('2d');
+  const bg = g.createLinearGradient(0, 0, W, H); bg.addColorStop(0, '#ec1187'); bg.addColorStop(.5, '#ff5f6d'); bg.addColorStop(1, '#ffa94d');
+  g.fillStyle = bg; g.fillRect(0, 0, W, H);
+  const rr = (x, y, w, h, r) => { g.beginPath(); g.roundRect(x, y, w, h, r); };
+  // message card
+  g.font = '600 56px Rubik, sans-serif';
+  const msgLines = wrapLines(g, m.body, 780).slice(0, 10);
+  g.font = '400 46px Rubik, sans-serif';
+  const repLines = m.reply ? wrapLines(g, m.reply, 760).slice(0, 8) : [];
+  const cardH = 170 + msgLines.length * 72 + (repLines.length ? 70 + repLines.length * 60 : 0);
+  const top = Math.max(260, (H - cardH) / 2 - 80);
+  g.fillStyle = 'rgba(0,0,0,.18)'; rr(110, top + 16, 860, cardH, 56); g.fill();
+  g.fillStyle = '#fff'; rr(110, top, 860, cardH, 56); g.fill();
+  g.fillStyle = '#111'; rr(150, top + 40, 780, 110 + msgLines.length * 72 - 40, 40); g.fill();
+  g.fillStyle = '#fff'; g.font = '600 56px Rubik, sans-serif';
+  msgLines.forEach((l, i) => g.fillText(l, 190, top + 120 + i * 72));
+  if (repLines.length) {
+    const ry = top + 110 + msgLines.length * 72 + 60;
+    g.fillStyle = '#ff5f6d'; g.fillRect(160, ry - 44, 10, repLines.length * 60 + 10);
+    g.fillStyle = '#111'; g.font = '400 46px Rubik, sans-serif';
+    repLines.forEach((l, i) => g.fillText(l, 195, ry + i * 60));
+  }
+  // header + footer
+  g.fillStyle = '#fff'; g.textAlign = 'center';
+  g.font = '800 96px Rubik, sans-serif'; g.fillText('wyspr', W / 2, 190);
+  g.font = '600 44px Rubik, sans-serif'; g.fillText(m.revealed ? 'from @' + m.from_name : 'from anonymous 🤫', W / 2, top - 50);
+  g.font = '600 46px Rubik, sans-serif'; g.fillText('send me anonymous messages 👇', W / 2, H - 260);
+  g.font = '800 50px Rubik, sans-serif'; g.fillText((location.host + '/u/' + me.username).slice(0, 40), W / 2, H - 180);
+  const blob = await new Promise(r => c.toBlob(r, 'image/png'));
+  const url = URL.createObjectURL(blob);
+  const file = new File([blob], 'wyspr.png', { type: 'image/png' });
+  const canShare = navigator.canShare && navigator.canShare({ files: [file] });
+  document.body.insertAdjacentHTML('beforeend', `<div class="modal"><div class="card" style="margin:0">
+    <img src="${url}" alt="Share card preview" style="width:100%;max-height:60vh;object-fit:contain;border-radius:14px;margin-bottom:12px">
+    <div class="row">${canShare ? '<button id="sh-go">Share</button>' : ''}<a href="${url}" download="wyspr.png"><button class="${canShare ? 'ghost' : ''}" type="button">Download</button></a>
+    <button class="ghost" id="sh-x">Close</button></div>
+    <p class="note">Post it to your story with your link so people can send you more.</p></div></div>`);
+  const close = () => { document.querySelector('.modal')?.remove(); URL.revokeObjectURL(url); };
+  $('#sh-x').onclick = close;
+  document.querySelector('.modal').onclick = e => { if (e.target.classList.contains('modal')) close(); };
+  if (canShare) $('#sh-go').onclick = async () => { try { await navigator.share({ files: [file], text: 'send me anonymous messages: ' + location.origin + '/u/' + me.username }); } catch {} };
+}
 
 // ---------- admin panel (only @nugget; the server checks too) ----------
 let aTab = 'users', aUser = '', aReported = false;
