@@ -61,6 +61,10 @@ button:disabled{opacity:.5}
 @media(prefers-reduced-motion:no-preference){.mile-num{animation:bump .6s cubic-bezier(.3,1.6,.5,1)}@keyframes bump{from{transform:scale(.3)}}}
 .own{border:3px solid #111!important}
 .receipt{font-size:13px;font-weight:600;color:var(--mute);margin:-4px 0 6px}.receipt.is-seen{color:#1a8f5a}
+.hid{padding:8px 12px!important;opacity:.75}
+.hid-text{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:600}
+.hid-toggle{width:100%;margin:4px 0 12px;background:rgba(255,255,255,.85)!important}
+.tools{justify-content:flex-end;margin-bottom:10px}.tools button{background:rgba(255,255,255,.85)}
 .guessed{background:#fff3c4;border-radius:12px;padding:8px 12px;font-weight:600;margin-bottom:8px}
 .modal{position:fixed;inset:0;background:rgba(0,0,0,.55);display:grid;place-items:center;padding:16px;z-index:20}
 .modal .card{width:min(420px,100%);max-height:94vh;overflow:auto}
@@ -252,7 +256,9 @@ async function loadList(){
   let rows;
   try { rows = await call(tab); } catch (x) { list.innerHTML = `<div class="err">${esc(x.message)}</div>`; return; }
   if (!rows.length) { list.innerHTML = `<div class="empty">${tab==='inbox' ? 'No messages yet — share your link!' : "You haven't sent anything yet."}</div>`; return; }
-  list.innerHTML = rows.map(m => tab === 'inbox' ? `
+  const inboxCard = m => m.hidden ? `
+    <div class="msg hid" data-id="${m.id}"><div class="row" style="justify-content:space-between;flex-wrap:nowrap">
+      <div class="hid-text">${esc(m.body)}</div><button class="small ghost" data-a="unhide">Unhide</button></div></div>` : `
     <div class="msg${m.seen ? '' : ' new'}" data-id="${m.id}">
       <div class="meta">${m.revealed ? av(m.from_avatar, m.from_name, 24) + ' from <b>@' + esc(m.from_name) + '</b>' : 'from <b>anonymous</b>'} · ${ago(m.created_at)}${m.seen ? '' : ' · <b style="color:var(--y2)">new</b>'}</div>
       <div class="text">${esc(m.body)}</div>
@@ -261,10 +267,18 @@ async function loadList(){
       <div class="row"><button class="small" data-a="reply">${m.reply ? 'Edit reply' : 'Reply'}</button>
         <button class="small" data-a="share">Share</button>
         ${!m.revealed && !m.guesses.length ? (m.reply ? '<button class="small ghost" data-a="guess">Guess who 🤔</button>' : '<button class="small ghost" data-a="guesslocked">Guess who 🔒</button>') : ''}
+        <button class="small ghost" data-a="hide">Hide</button>
         <button class="small ghost" data-a="delete">Delete</button>
         <button class="small danger" data-a="block">Block sender</button>
         <button class="small danger" data-a="report">Report</button></div>
-    </div>` : `
+    </div>`;
+  if (tab === 'inbox') {
+    const shown = rows.filter(m => !m.hidden), hid = rows.filter(m => m.hidden), replied = shown.filter(m => m.reply).length;
+    list.innerHTML = (replied ? `<div class="row tools"><button class="small ghost" data-t="hideall">Hide all replied (${replied})</button></div>` : '')
+      + (shown.length ? shown.map(inboxCard).join('') : `<div class="empty">All caught up — everything's hidden ✨</div>`)
+      + (hid.length ? `<button class="ghost hid-toggle" data-t="toggle">${showHidden ? 'Hide' : 'Show'} hidden messages (${hid.length})</button>`
+        + (showHidden ? hid.map(inboxCard).join('') : '') : '');
+  } else list.innerHTML = rows.map(m => `
     <div class="msg${m.reply && !m.reply_seen ? ' new' : ''}" data-id="${m.id}">
       <div class="meta">${av(m.to_avatar, m.to_name, 24)} to <b>@${esc(m.to_name)}</b> · ${ago(m.created_at)} · ${m.revealed ? 'they know it\'s you' : 'anonymous'}</div>
       <div class="receipt ${m.seen ? 'is-seen' : ''}">${m.seen ? '✓✓ Seen' + (m.seen_at ? ' ' + ago(m.seen_at) : '') : '✓ Delivered'}</div>
@@ -279,7 +293,13 @@ async function loadList(){
   if (tab === 'sent' && rows.some(m => m.reply && !m.reply_seen)) { try { await call('replies-seen', {}); } catch {} setUnread(me.unread || 0, 0); }
 }
 
+let showHidden = false;
 $('#app').addEventListener('click', async e => {
+  const t = e.target.closest('button[data-t]');
+  if (t) {
+    if (t.dataset.t === 'toggle') { showHidden = !showHidden; loadList(); return; }
+    if (t.dataset.t === 'hideall') { try { await call('hide', { all: 'replied' }); toast('Hid everything you replied to'); loadList(); } catch (x) { toast(x.message); } return; }
+  }
   const b = e.target.closest('button[data-a]'); if (!b) return;
   const box = b.closest('.msg'), id = box.dataset.id, a = b.dataset.a;
   if (a === 'reply') {
@@ -302,9 +322,10 @@ $('#app').addEventListener('click', async e => {
   }
   try {
     if (a === 'sendreply') await call('reply', { id, text: box.querySelector('textarea').value });
+    else if (a === 'hide' || a === 'unhide') await call('hide', { id, hidden: a === 'hide' });
     else if (a === 'sendguess') await call('guess', { id, username: box.querySelector('.gform input').value });
     else await call(a, { id });
-    toast({ sendguess: 'Guess locked in 🤞', sendreply: 'Reply saved', block: 'Blocked — their messages are gone', report: 'Reported, thanks', delete: 'Deleted', reveal: "Revealed — they'll see your name" }[a]);
+    toast({ sendguess: 'Guess locked in 🤞', sendreply: 'Reply saved', block: 'Blocked — their messages are gone', report: 'Reported, thanks', delete: 'Deleted', hide: 'Hidden — find it at the bottom', unhide: 'Back in your inbox', reveal: "Revealed — they'll see your name" }[a]);
     loadList();
   } catch (x) { toast(x.message); }
 });

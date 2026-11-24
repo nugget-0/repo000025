@@ -174,13 +174,13 @@ async function api(req, path) {
     case '/api/inbox': {
       // sender name only leaves the server if the sender chose to reveal
       const rows = await q(
-        `SELECT m.id, m.body, m.created_at, m.reply, m.revealed, m.seen,
+        `SELECT m.id, m.body, m.created_at, m.reply, m.revealed, m.seen, m.hidden,
                 CASE WHEN m.revealed THEN u.username END AS from_name,
                 CASE WHEN m.revealed THEN u.avatar END AS from_avatar,
                 (SELECT string_agg(g.guess, ',' ORDER BY g.id) FROM guesses g WHERE g.message_id = m.id) AS guesses
            FROM messages m JOIN users u ON u.id = m.from_user
           WHERE m.to_user = $1 ORDER BY m.created_at DESC LIMIT 100`, [me.id]);
-      return json(rows.map(r => ({ ...r, revealed: r.revealed === 't' || r.revealed === 'true', seen: r.seen === 't' || r.seen === 'true',
+      return json(rows.map(r => ({ ...r, revealed: r.revealed === 't' || r.revealed === 'true', seen: r.seen === 't' || r.seen === 'true', hidden: r.hidden === 't' || r.hidden === 'true',
         guesses: r.guesses ? r.guesses.split(',') : [] })));
     }
 
@@ -223,6 +223,13 @@ async function api(req, path) {
       if (!text) return err('Write a reply first');
       const rows = await q('UPDATE messages SET reply = $1, replied_at = now(), reply_seen = false WHERE id = $2 AND to_user = $3 RETURNING id', [text, body.id, me.id]);
       return rows.length ? json({ ok: true }) : err('Not your message', 404);
+    }
+
+    case '/api/hide': {
+      // hide/unhide one message in my inbox, or hide everything I've already replied to
+      if (body.all === 'replied') await q('UPDATE messages SET hidden = true WHERE to_user = $1 AND reply IS NOT NULL AND NOT hidden', [me.id]);
+      else await q('UPDATE messages SET hidden = $1 WHERE id = $2 AND to_user = $3', [body.hidden === false ? 'false' : 'true', body.id, me.id]);
+      return json({ ok: true });
     }
 
     case '/api/delete': {

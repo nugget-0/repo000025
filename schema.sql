@@ -12,3 +12,4 @@ CREATE TABLE guesses (id bigserial PRIMARY KEY, message_id bigint NOT NULL REFER
 ALTER TABLE messages ADD COLUMN reply_seen boolean NOT NULL DEFAULT true;
 ALTER TABLE users ADD COLUMN milestone int NOT NULL DEFAULT 0;
 ALTER TABLE messages ADD COLUMN seen_at timestamptz;
+ALTER TABLE messages ADD COLUMN hidden boolean NOT NULL DEFAULT false;
