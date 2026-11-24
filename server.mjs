@@ -70,7 +70,7 @@ async function getUser(req) {
   const auth = req.headers.get('authorization') || '';
   if (!auth.startsWith('Bearer ')) return null;
   const rows = await q(
-    'SELECT u.id, u.username, u.prompt, u.avatar FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token = $1 AND NOT u.banned',
+    'SELECT u.id, u.username, u.prompt, u.avatar, u.must_change FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token = $1 AND NOT u.banned',
     [sha(auth.slice(7))]
   );
   return rows[0] || null;
@@ -120,7 +120,7 @@ async function api(req, path) {
         (SELECT milestone FROM users WHERE id = $1) AS milestone`, [me.id]);
       const c = { unread: Number(n[0].unread), replies: Number(n[0].replies), received: Number(n[0].received), milestone: Number(n[0].milestone) };
       if (path === '/api/unread') return json(c);
-      return json({ username: me.username, prompt: me.prompt, avatar: me.avatar, ...c, admin: me.username === ADMIN });
+      return json({ username: me.username, prompt: me.prompt, avatar: me.avatar, ...c, admin: me.username === ADMIN, must_change: me.must_change === 't' || me.must_change === 'true' });
     }
 
     case '/api/seen':
@@ -152,8 +152,10 @@ async function api(req, path) {
       const oldPw = String(body.old || ''), newPw = String(body.new || '');
       if (newPw.length < 6) return err('New password must be at least 6 characters');
       const rows = await q('SELECT pass_hash FROM users WHERE id = $1', [me.id]);
-      if (!checkPass(oldPw, rows[0].pass_hash)) return err('Current password is wrong', 401);
-      await q('UPDATE users SET pass_hash = $1 WHERE id = $2', [hashPass(newPw), me.id]);
+      // after an admin reset, the user picks a new one without retyping the temporary password
+      const forced = me.must_change === 't' || me.must_change === 'true';
+      if (!forced && !checkPass(oldPw, rows[0].pass_hash)) return err('Current password is wrong', 401);
+      await q('UPDATE users SET pass_hash = $1, must_change = false WHERE id = $2', [hashPass(newPw), me.id]);
       // log out every other device
       await q('DELETE FROM sessions WHERE user_id = $1 AND token <> $2', [me.id, sha((req.headers.get('authorization') || '').slice(7))]);
       return json({ ok: true });
@@ -311,7 +313,7 @@ async function admin(path, body, me) {
       const chosen = String(body.password || '').trim();
       if (chosen && chosen.length < 6) return err('Password must be at least 6 characters');
       const temp = chosen || words[randomBytes(1)[0] % words.length] + '-' + words[randomBytes(1)[0] % words.length] + '-' + (randomBytes(2).readUInt16BE() % 900 + 100);
-      const rows = await q('UPDATE users SET pass_hash = $1 WHERE username = $2 RETURNING id', [hashPass(temp), name]);
+      const rows = await q('UPDATE users SET pass_hash = $1, must_change = true WHERE username = $2 RETURNING id', [hashPass(temp), name]);
       if (!rows.length) return err('No such user', 404);
       await q('DELETE FROM sessions WHERE user_id = $1', [rows[0].id]);
       return json({ temp });

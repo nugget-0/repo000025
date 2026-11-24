@@ -177,7 +177,7 @@ function authForm(title, after){
     $('#af').onsubmit = async e => {
       e.preventDefault(); $('#e').textContent = '';
       try { const d = await call(mode, { username: $('#u').value, password: $('#p').value });
-        setToken(d.token); me = await call('me'); renderWho(); after(); }
+        setToken(d.token); me = await call('me'); renderWho(); me.must_change ? forceNewPassword(after) : after(); }
       catch (x) { $('#e').textContent = x.message; }
     };
   };
@@ -219,6 +219,22 @@ function wantYourOwn(){
   $('#own-c').onclick = async () => { try { await navigator.clipboard.writeText(link); toast('Link copied — go post it!'); } catch { $('#own-l').select(); } };
   if ($('#own-s')) $('#own-s').onclick = async () => { try { await navigator.share({ text: 'send me anonymous messages 👀', url: link }); } catch {} };
   $('#after').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+// after an admin reset: make the user choose their own password so nobody else knows it
+function forceNewPassword(after){
+  app.innerHTML = `<div class="card"><h2>Pick a new password 🔒</h2>
+    <p class="note" style="margin-top:0">Your password was reset by the admin, so they know the temporary one. Choose your own now — only you will know it.</p>
+    <form id="fpf"><input type="password" id="fp1" placeholder="New password (6+ characters)" autocomplete="new-password">
+    <input type="password" id="fp2" placeholder="Type it again" autocomplete="new-password">
+    <div class="err" id="fp-e"></div><button style="width:100%">Save my password</button></form></div>`;
+  $('#fp1').focus();
+  $('#fpf').onsubmit = async e => {
+    e.preventDefault(); $('#fp-e').textContent = '';
+    if ($('#fp1').value !== $('#fp2').value) { $('#fp-e').textContent = "Those don't match"; return; }
+    try { await call('password', { new: $('#fp1').value }); me.must_change = false; toast('Password saved 🔒'); after(); }
+    catch (x) { $('#fp-e').textContent = x.message; }
+  };
 }
 
 // ---------- home: link, prompt, inbox, sent ----------
@@ -443,7 +459,7 @@ async function adminUsers(){
         e.preventDefault(); $('#tp-e').textContent = '';
         try { const d = await call('admin/resetpw', { username: name, password: $('#tp').value });
           document.querySelector('.modal .card').innerHTML = `<h2>New password for @${esc(name)}</h2>
-            <p class="note">Send this to them. It works right away, and they can change it under "Change password" once they're in. They've been logged out everywhere.</p>
+            <p class="note">Send this to them. When they log in with it, they'll have to pick their own new password straight away, so you won't know it. They've been logged out everywhere.</p>
             <div class="link"><input readonly value="${esc(d.temp)}" id="tp2"><button id="tp-c">Copy</button></div>
             <div class="row" style="margin-top:12px"><button class="ghost" id="tp-d">Done</button></div>`;
           $('#tp-c').onclick = async () => { try { await navigator.clipboard.writeText(d.temp); toast('Copied'); } catch { $('#tp2').select(); } };
@@ -487,6 +503,7 @@ async function adminMessages(){
   const m = location.pathname.match(/^\/u\/([^/]+)/);
   if (m) sendPage(decodeURIComponent(m[1]));
   else if (location.pathname.startsWith('/admin') && me && me.admin) adminPage();
+  else if (me && me.must_change) forceNewPassword(home);
   else if (me) home();
   else authForm('Get anonymous messages from your friends', home);
 })();
