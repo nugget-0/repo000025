@@ -433,15 +433,24 @@ async function adminUsers(){
     if (x === 'view') { aTab = 'messages'; aUser = name; aReported = false; return adminPage(); }
     if (!b.dataset.sure) { b.dataset.sure = 1; b.textContent = 'Sure?'; return; }
     if (x === 'resetpw') {
-      try { const d = await call('admin/resetpw', { username: name });
-        document.body.insertAdjacentHTML('beforeend', `<div class="modal"><div class="card" style="margin:0"><h2>New password for @${esc(name)}</h2>
-          <p class="note">Send this to them. It works right away, and they can change it under "Change password" once they're in. They've been logged out everywhere.</p>
-          <div class="link"><input readonly value="${esc(d.temp)}" id="tp"><button id="tp-c">Copy</button></div>
-          <div class="row" style="margin-top:12px"><button class="ghost" id="tp-x">Done</button></div></div></div>`);
-        $('#tp-c').onclick = async () => { try { await navigator.clipboard.writeText(d.temp); toast('Copied'); } catch { $('#tp').select(); } };
-        $('#tp-x').onclick = () => document.querySelector('.modal').remove();
-        b.textContent = 'Reset password'; delete b.dataset.sure;
-      } catch (x2) { toast(x2.message); }
+      b.textContent = 'Reset password'; delete b.dataset.sure;
+      document.body.insertAdjacentHTML('beforeend', `<div class="modal"><div class="card" style="margin:0"><h2>Reset password for @${esc(name)}</h2>
+        <form id="rpf"><input id="tp" placeholder="New password (leave blank for a random one)" autocomplete="off">
+        <div class="err" id="tp-e"></div><div class="row"><button>Set password</button><button type="button" class="ghost" id="tp-x">Cancel</button></div></form></div></div>`);
+      const close = () => document.querySelector('.modal').remove();
+      $('#tp-x').onclick = close;
+      $('#rpf').onsubmit = async e => {
+        e.preventDefault(); $('#tp-e').textContent = '';
+        try { const d = await call('admin/resetpw', { username: name, password: $('#tp').value });
+          document.querySelector('.modal .card').innerHTML = `<h2>New password for @${esc(name)}</h2>
+            <p class="note">Send this to them. It works right away, and they can change it under "Change password" once they're in. They've been logged out everywhere.</p>
+            <div class="link"><input readonly value="${esc(d.temp)}" id="tp2"><button id="tp-c">Copy</button></div>
+            <div class="row" style="margin-top:12px"><button class="ghost" id="tp-d">Done</button></div>`;
+          $('#tp-c').onclick = async () => { try { await navigator.clipboard.writeText(d.temp); toast('Copied'); } catch { $('#tp2').select(); } };
+          $('#tp-d').onclick = close;
+        } catch (x2) { $('#tp-e').textContent = x2.message; }
+      };
+      $('#tp').focus();
       return;
     }
     try { await call('admin/ban', { username: name, ban: x === 'ban' }); toast(x === 'ban' ? `Banned @${name}` : `Unbanned @${name}`); adminPage(); } catch (x2) { toast(x2.message); }

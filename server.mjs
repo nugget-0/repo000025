@@ -308,7 +308,9 @@ async function admin(path, body, me) {
       const name = String(body.username || '').toLowerCase();
       if (name === ADMIN) return err("Can't reset the admin's password here");
       const words = ['tiger','mango','rocket','pixel','cloud','ninja','lemon','comet','panda','storm','candy','river'];
-      const temp = words[randomBytes(1)[0] % words.length] + '-' + words[randomBytes(1)[0] % words.length] + '-' + (randomBytes(2).readUInt16BE() % 900 + 100);
+      const chosen = String(body.password || '').trim();
+      if (chosen && chosen.length < 6) return err('Password must be at least 6 characters');
+      const temp = chosen || words[randomBytes(1)[0] % words.length] + '-' + words[randomBytes(1)[0] % words.length] + '-' + (randomBytes(2).readUInt16BE() % 900 + 100);
       const rows = await q('UPDATE users SET pass_hash = $1 WHERE username = $2 RETURNING id', [hashPass(temp), name]);
       if (!rows.length) return err('No such user', 404);
       await q('DELETE FROM sessions WHERE user_id = $1', [rows[0].id]);
