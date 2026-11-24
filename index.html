@@ -65,6 +65,7 @@ button:disabled{opacity:.5}
 .hid-text{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:600}
 .hid-toggle{width:100%;margin:4px 0 12px;background:rgba(255,255,255,.85)!important}
 .tools{justify-content:flex-end;margin-bottom:10px}.tools button{background:rgba(255,255,255,.85)}
+.pw{margin-top:14px}.pw summary{cursor:pointer;font-weight:600;color:var(--mute);font-size:14px}
 .guessed{background:#fff3c4;border-radius:12px;padding:8px 12px;font-weight:600;margin-bottom:8px}
 .modal{position:fixed;inset:0;background:rgba(0,0,0,.55);display:grid;place-items:center;padding:16px;z-index:20}
 .modal .card{width:min(420px,100%);max-height:94vh;overflow:auto}
@@ -169,6 +170,7 @@ function authForm(title, after){
       <form id="af"><input id="u" placeholder="username" autocomplete="username" autocapitalize="none">
       <input id="p" type="password" placeholder="password" autocomplete="${mode==='signup'?'new-password':'current-password'}">
       <div class="err" id="e"></div><button style="width:100%">${mode==='signup'?'Create account':'Log in'}</button></form>
+      ${mode === 'login' ? '<p class="note" style="margin-top:10px">Forgot your password? Ask the Wyspr admin to reset it — they\'ll give you a temporary one.</p>' : ''}
       <p class="note">Messages you get show up as anonymous. Your account lets you block people, and lets senders choose to reveal themselves.</p></div>`;
     $('#m-up').onclick = () => { mode = 'signup'; draw(); };
     $('#m-in').onclick = () => { mode = 'login'; draw(); };
@@ -228,7 +230,11 @@ function home(){
       <div class="link"><input readonly value="${esc(link)}" id="lk"><button id="cp">Copy</button></div>
       <p class="note" style="margin-bottom:6px">Put it in your story or bio. Your prompt:</p>
       <div class="link"><input id="pr" maxlength="120" value="${esc(me.prompt)}"><button class="ghost" id="ps">Save</button></div>
-      <div class="chips">${PROMPTS.map(p => `<button data-p="${esc(p)}">${esc(p)}</button>`).join('')}</div></div>
+      <div class="chips">${PROMPTS.map(p => `<button data-p="${esc(p)}">${esc(p)}</button>`).join('')}</div>
+      <details class="pw"><summary>Change password</summary>
+        <form id="pwf" style="margin-top:10px"><input type="password" id="pw-old" placeholder="Current password" autocomplete="current-password">
+        <input type="password" id="pw-new" placeholder="New password (6+ characters)" autocomplete="new-password">
+        <div class="err" id="pw-e"></div><button>Save new password</button></form></details></div>
     <div class="tabs"><button id="t-in" class="${tab==='inbox'?'on':''}">Inbox</button><button id="t-sent" class="${tab==='sent'?'on':''}">Sent</button></div>
     <div id="list"><div class="empty">Loading…</div></div>`;
   $('#cp').onclick = async () => { try { await navigator.clipboard.writeText(link); toast('Link copied'); } catch { $('#lk').select(); toast('Select + copy the link'); } };
@@ -238,6 +244,9 @@ function home(){
   $('#pc').onclick = () => $('#pic').click();
   $('#pic').onchange = async e => { const f = e.target.files[0]; if (!f) return;
     try { const d = await call('avatar', { image: await shrinkImage(f) }); me.avatar = d.avatar; toast('Photo updated'); renderWho(); home(); } catch (x) { toast(x.message); } };
+  $('#pwf').onsubmit = async e => { e.preventDefault(); $('#pw-e').textContent = '';
+    try { await call('password', { old: $('#pw-old').value, new: $('#pw-new').value }); $('#pw-old').value = $('#pw-new').value = ''; $('.pw').open = false; toast('Password changed 🔒'); }
+    catch (x) { $('#pw-e').textContent = x.message; } };
   if ($('#pr0')) $('#pr0').onclick = async () => { try { await call('avatar', { image: null }); me.avatar = null; renderWho(); home(); } catch (x) { toast(x.message); } };
   setUnread(me.unread || 0, me.replies || 0);
   checkMilestone();
@@ -416,13 +425,25 @@ async function adminUsers(){
     rows.map(u => `<tr data-u="${esc(u.username)}"><td>${av(u.avatar, u.username, 28)} <b>@${esc(u.username)}</b>${u.banned ? ' <span class="tag">banned</span>' : ''}<div class="note">${esc(u.prompt)}</div></td>
       <td>${ago(u.created_at)}</td><td class="n">${u.sent}</td><td class="n">${u.received}</td><td class="n">${u.reported}</td>
       <td><div class="row"><button class="small ghost" data-x="view">Messages</button>${u.username === me.username ? '' :
-        `<button class="small danger" data-x="${u.banned ? 'unban' : 'ban'}">${u.banned ? 'Unban' : 'Ban'}</button>`}</div></td></tr>`).join('')}</tbody></table></div>`;
+        `<button class="small ghost" data-x="resetpw">Reset password</button><button class="small danger" data-x="${u.banned ? 'unban' : 'ban'}">${u.banned ? 'Unban' : 'Ban'}</button>`}</div></td></tr>`).join('')}</tbody></table></div>`;
   $('#us').oninput = e => { const s = e.target.value.toLowerCase(); box.querySelectorAll('tbody tr').forEach(tr => tr.style.display = tr.dataset.u.includes(s) ? '' : 'none'); };
   box.onclick = async e => {
     const b = e.target.closest('button[data-x]'); if (!b) return;
     const name = b.closest('tr').dataset.u, x = b.dataset.x;
     if (x === 'view') { aTab = 'messages'; aUser = name; aReported = false; return adminPage(); }
     if (!b.dataset.sure) { b.dataset.sure = 1; b.textContent = 'Sure?'; return; }
+    if (x === 'resetpw') {
+      try { const d = await call('admin/resetpw', { username: name });
+        document.body.insertAdjacentHTML('beforeend', `<div class="modal"><div class="card" style="margin:0"><h2>New password for @${esc(name)}</h2>
+          <p class="note">Send this to them. It works right away, and they can change it under "Change password" once they're in. They've been logged out everywhere.</p>
+          <div class="link"><input readonly value="${esc(d.temp)}" id="tp"><button id="tp-c">Copy</button></div>
+          <div class="row" style="margin-top:12px"><button class="ghost" id="tp-x">Done</button></div></div></div>`);
+        $('#tp-c').onclick = async () => { try { await navigator.clipboard.writeText(d.temp); toast('Copied'); } catch { $('#tp').select(); } };
+        $('#tp-x').onclick = () => document.querySelector('.modal').remove();
+        b.textContent = 'Reset password'; delete b.dataset.sure;
+      } catch (x2) { toast(x2.message); }
+      return;
+    }
     try { await call('admin/ban', { username: name, ban: x === 'ban' }); toast(x === 'ban' ? `Banned @${name}` : `Unbanned @${name}`); adminPage(); } catch (x2) { toast(x2.message); }
   };
 }

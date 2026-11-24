@@ -148,6 +148,17 @@ async function api(req, path) {
       await q('DELETE FROM sessions WHERE token = $1', [sha((req.headers.get('authorization') || '').slice(7))]);
       return json({ ok: true });
 
+    case '/api/password': {
+      const oldPw = String(body.old || ''), newPw = String(body.new || '');
+      if (newPw.length < 6) return err('New password must be at least 6 characters');
+      const rows = await q('SELECT pass_hash FROM users WHERE id = $1', [me.id]);
+      if (!checkPass(oldPw, rows[0].pass_hash)) return err('Current password is wrong', 401);
+      await q('UPDATE users SET pass_hash = $1 WHERE id = $2', [hashPass(newPw), me.id]);
+      // log out every other device
+      await q('DELETE FROM sessions WHERE user_id = $1 AND token <> $2', [me.id, sha((req.headers.get('authorization') || '').slice(7))]);
+      return json({ ok: true });
+    }
+
     case '/api/prompt': {
       const prompt = String(body.prompt || '').trim().slice(0, 120) || 'send me anonymous messages!';
       await q('UPDATE users SET prompt = $1 WHERE id = $2', [prompt, me.id]);
@@ -292,6 +303,18 @@ async function admin(path, body, me) {
       await q('DELETE FROM messages WHERE id = $1', [body.id]);
       return json({ ok: true });
     }
+    case '/api/admin/resetpw': {
+      // give a locked-out user a temporary password; they change it after logging in
+      const name = String(body.username || '').toLowerCase();
+      if (name === ADMIN) return err("Can't reset the admin's password here");
+      const words = ['tiger','mango','rocket','pixel','cloud','ninja','lemon','comet','panda','storm','candy','river'];
+      const temp = words[randomBytes(1)[0] % words.length] + '-' + words[randomBytes(1)[0] % words.length] + '-' + (randomBytes(2).readUInt16BE() % 900 + 100);
+      const rows = await q('UPDATE users SET pass_hash = $1 WHERE username = $2 RETURNING id', [hashPass(temp), name]);
+      if (!rows.length) return err('No such user', 404);
+      await q('DELETE FROM sessions WHERE user_id = $1', [rows[0].id]);
+      return json({ temp });
+    }
+
     case '/api/admin/ban': {
       const name = String(body.username || '').toLowerCase();
       if (name === ADMIN) return err("Can't ban the admin");
