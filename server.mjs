@@ -124,7 +124,7 @@ async function api(req, path) {
     }
 
     case '/api/seen':
-      await q('UPDATE messages SET seen = true WHERE to_user = $1 AND NOT seen', [me.id]);
+      await q('UPDATE messages SET seen = true, seen_at = now() WHERE to_user = $1 AND NOT seen', [me.id]);
       return json({ ok: true });
 
     case '/api/replies-seen':
@@ -204,13 +204,13 @@ async function api(req, path) {
 
     case '/api/sent': {
       const rows = await q(
-        `SELECT m.id, m.body, m.created_at, m.reply, m.reply_seen, m.revealed, u.username AS to_name, u.avatar AS to_avatar,
+        `SELECT m.id, m.body, m.created_at, m.reply, m.reply_seen, m.seen, m.seen_at, m.revealed, u.username AS to_name, u.avatar AS to_avatar,
                 (SELECT count(*) FROM guesses g WHERE g.message_id = m.id) AS guess_count,
                 EXISTS (SELECT 1 FROM guesses g WHERE g.message_id = m.id AND g.correct) AS guessed
            FROM messages m JOIN users u ON u.id = m.to_user
           WHERE m.from_user = $1 ORDER BY m.created_at DESC LIMIT 100`, [me.id]);
       return json(rows.map(r => ({ ...r, revealed: r.revealed === 't' || r.revealed === 'true',
-        guessed: r.guessed === 't' || r.guessed === 'true', guess_count: Number(r.guess_count), reply_seen: r.reply_seen !== 'f' && r.reply_seen !== 'false' })));
+        guessed: r.guessed === 't' || r.guessed === 'true', guess_count: Number(r.guess_count), reply_seen: r.reply_seen !== 'f' && r.reply_seen !== 'false', seen: r.seen === 't' || r.seen === 'true' })));
     }
 
     case '/api/reveal': {

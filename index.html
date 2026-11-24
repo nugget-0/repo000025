@@ -60,6 +60,7 @@ button:disabled{opacity:.5}
 .mile .card{animation:none}.mile-num{font-size:84px;font-weight:800;line-height:1;background:linear-gradient(135deg,#ec1187,#ffa94d);-webkit-background-clip:text;background-clip:text;color:transparent;margin-bottom:6px}
 @media(prefers-reduced-motion:no-preference){.mile-num{animation:bump .6s cubic-bezier(.3,1.6,.5,1)}@keyframes bump{from{transform:scale(.3)}}}
 .own{border:3px solid #111!important}
+.receipt{font-size:13px;font-weight:600;color:var(--mute);margin:-4px 0 6px}.receipt.is-seen{color:#1a8f5a}
 .guessed{background:#fff3c4;border-radius:12px;padding:8px 12px;font-weight:600;margin-bottom:8px}
 .modal{position:fixed;inset:0;background:rgba(0,0,0,.55);display:grid;place-items:center;padding:16px;z-index:20}
 .modal .card{width:min(420px,100%);max-height:94vh;overflow:auto}
@@ -266,6 +267,7 @@ async function loadList(){
     </div>` : `
     <div class="msg${m.reply && !m.reply_seen ? ' new' : ''}" data-id="${m.id}">
       <div class="meta">${av(m.to_avatar, m.to_name, 24)} to <b>@${esc(m.to_name)}</b> · ${ago(m.created_at)} · ${m.revealed ? 'they know it\'s you' : 'anonymous'}</div>
+      <div class="receipt ${m.seen ? 'is-seen' : ''}">${m.seen ? '✓✓ Seen' + (m.seen_at ? ' ' + ago(m.seen_at) : '') : '✓ Delivered'}</div>
       <div class="text">${esc(m.body)}</div>
       ${m.reply ? `<div class="reply"><b>@${esc(m.to_name)}${m.reply_seen ? '' : ' replied 💬'}:</b> ${esc(m.reply)}</div>` : ''}
       ${!m.revealed && m.guessed ? `<div class="guessed">👀 @${esc(m.to_name)} guessed it's you!</div>` : ''}

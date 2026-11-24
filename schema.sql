@@ -11,3 +11,4 @@ ALTER TABLE messages ADD COLUMN seen boolean NOT NULL DEFAULT false;
 CREATE TABLE guesses (id bigserial PRIMARY KEY, message_id bigint NOT NULL REFERENCES messages(id) ON DELETE CASCADE, guess text NOT NULL, correct boolean NOT NULL, created_at timestamptz NOT NULL DEFAULT now());
 ALTER TABLE messages ADD COLUMN reply_seen boolean NOT NULL DEFAULT true;
 ALTER TABLE users ADD COLUMN milestone int NOT NULL DEFAULT 0;
+ALTER TABLE messages ADD COLUMN seen_at timestamptz;
